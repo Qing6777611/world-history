@@ -7,26 +7,27 @@ import { countryCode, countryRegion, countryPalette, countryView, type CountryFe
 
 export type GlobeCommand = { id: number; action: "in" | "out" | "reset" | "focus" | "country"; lat?: number; lng?: number; code?: string };
 export type HoverInfo = { name: string; kind: "country" | "event"; events: AtlasEvent[]; x: number; y: number } | null;
-type Props = { events: AtlasEvent[]; spinning: boolean; command: GlobeCommand | null; onSelect: (event: AtlasEvent) => void; onHover: (info: HoverInfo) => void; selectedCountry: string | null; onRegionSelect: (region: CountryRegion) => void; onCountriesReady: (regions: CountryRegion[]) => void };
+type Props = { events: AtlasEvent[]; spinning: boolean; command: GlobeCommand | null; onSelect: (event: AtlasEvent) => void; onHover: (info: HoverInfo) => void; selectedCountry: string | null; onRegionSelect: (region: CountryRegion) => void; onCountriesReady: (regions: CountryRegion[]) => void; onReset: () => void; onToggleSpin: () => void };
 
 // Rotation uses one camera state: direct pointer input wins over idle spin.
 // Release velocity decays exponentially into a slow spin in the last direction.
-export default function GlobeView({ events, spinning, command, onSelect, onHover, selectedCountry, onRegionSelect, onCountriesReady }: Props) {
+export default function GlobeView({ events, spinning, command, onSelect, onHover, selectedCountry, onRegionSelect, onCountriesReady, onReset, onToggleSpin }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const api = useRef<any>(null);
   const data = useRef(events);
   const reducedMotion = useRef(false);
-  const callbacks = useRef({ onSelect, onHover, onRegionSelect, onCountriesReady });
+  const callbacks = useRef({ onSelect, onHover, onRegionSelect, onCountriesReady, onReset, onToggleSpin });
   const selectedCode = useRef(selectedCountry);
   const repaint = useRef(() => {});
   const focusCountry = useRef<(code: string) => void>(() => {});
   const spin = useRef(spinning);
+  const overview = useRef({ altitude: 1.65, active: true });
   const camera = useRef({ lat: 21, lng: 68, altitude: 1.65, targetAltitude: 1.65, vx: -1.7, vy: 0, direction: -1 });
   const flight = useRef<{ lat: number; lng: number } | null>(null);
   const drag = useRef({ active: false, x: 0, y: 0, last: 0, moved: 0, ended: 0, pointer: -1 });
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [attempt, setAttempt] = useState(0);
-  data.current = events; callbacks.current = { onSelect, onHover, onRegionSelect, onCountriesReady }; spin.current = spinning; selectedCode.current = selectedCountry;
+  data.current = events; callbacks.current = { onSelect, onHover, onRegionSelect, onCountriesReady, onReset, onToggleSpin }; spin.current = spinning; selectedCode.current = selectedCountry;
 
   useEffect(() => {
     let cancelled = false, frame = 0;
@@ -48,6 +49,7 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
         const surfaceAltitude = (f: object) => countryCode(f as CountryFeature) === selectedCode.current ? .012 : f === hovered ? .009 : .005;
         const stroke = (f: object) => countryCode(f as CountryFeature) === selectedCode.current ? "#fff1ca" : f === hovered ? "#eff3df" : "#263e43";
         const selectCountry = (f: CountryFeature, point?: {lat: number; lng: number}) => {
+          overview.current.active = false;
           const view = countryView(f, element.clientWidth/element.clientHeight, globe.camera().fov, point);
           camera.current.vx = 0; camera.current.vy = 0;
           camera.current.targetAltitude = view.altitude;
@@ -61,12 +63,12 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
           .backgroundColor("rgba(0,0,0,0)")
           .width(element.clientWidth).height(element.clientHeight)
           .globeMaterial(new THREE.MeshPhongMaterial({ color: "#122d3a", shininess: 9, specular: "#1f4653" }))
-          .showAtmosphere(true).atmosphereColor("#658d9b").atmosphereAltitude(0.12)
+          .showAtmosphere(true).atmosphereColor("#658d9b").atmosphereAltitude(0.08)
           .showGraticules(false)
           .polygonsData(geography.features)
           .polygonAltitude(surfaceAltitude).polygonCapColor(colors).polygonSideColor(() => "#203c43")
           .polygonStrokeColor(stroke).polygonsTransitionDuration(reducedMotion.current ? 0 : 230)
-          .htmlElementsData(data.current).htmlLat("lat").htmlLng("lng").htmlAltitude(0.035)
+          .htmlElementsData(data.current.filter(e => e.country === selectedCode.current)).htmlLat("lat").htmlLng("lng").htmlAltitude(0.035)
           .htmlElement((item: any) => {
             const event = item as AtlasEvent;
             const pin = document.createElement("button");
@@ -81,7 +83,7 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
             pin.onclick = () => callbacks.current.onSelect(event);
             return pin;
           })
-          .ringsData(reducedMotion.current ? [] : data.current).ringLat("lat").ringLng("lng").ringAltitude(0.024)
+          .ringsData(reducedMotion.current ? [] : data.current.filter(e => e.country === selectedCode.current)).ringLat("lat").ringLng("lng").ringAltitude(0.024)
           .ringColor((e: any) => (t: number) => new THREE.Color(e.color).getStyle().replace("rgb(", "rgba(").replace(")", `,${(1-t)*0.6})`))
           .ringMaxRadius(2.5).ringPropagationSpeed(0.65).ringRepeatPeriod(2600)
           .onPolygonHover((f: any) => {
@@ -101,11 +103,21 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
         const controls = globe.controls();
         controls.enableRotate = false; controls.enableZoom = false; controls.enablePan = false;
         controls.enableDamping = false; controls.autoRotate = false;
+        const fitOverview = () => {
+          const w = element.clientWidth, h = element.clientHeight;
+          const padding = Math.min(24, Math.min(w,h)*.04);
+          const tangent = Math.tan(globe.camera().fov*Math.PI/360);
+          const k = Math.min(tangent*(1-2*padding/h), tangent*(w/h)*(1-2*padding/w));
+          overview.current.altitude = 1.08*Math.sqrt(1+1/(k*k))-1;
+          if (overview.current.active) camera.current.targetAltitude = overview.current.altitude;
+        };
+        fitOverview();
+        if (overview.current.active) camera.current.altitude = overview.current.altitude;
         const { lat, lng, altitude } = camera.current;
         globe.pointOfView({ lat, lng, altitude }, 0);
         const canvas = globe.renderer().domElement as HTMLCanvasElement;
         canvas.setAttribute("aria-hidden", "true");
-        const refresh = () => { globe.width(element.clientWidth).height(element.clientHeight); };
+        const refresh = () => { globe.width(element.clientWidth).height(element.clientHeight); fitOverview(); };
         const resize = new ResizeObserver(refresh); resize.observe(element);
         const down = (event: PointerEvent) => {
           if (event.button !== 0 || drag.current.active) return;
@@ -137,7 +149,7 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
         };
         const leave = () => { if (!drag.current.active) callbacks.current.onHover(null); };
         const wheel = (event: WheelEvent) => {
-          event.preventDefault(); camera.current.targetAltitude = Math.max(.16, Math.min(3.3, camera.current.targetAltitude+event.deltaY*0.0015));
+          event.preventDefault(); overview.current.active = false; camera.current.targetAltitude = Math.max(.16, Math.min(Math.max(3.3, overview.current.altitude*1.35), camera.current.targetAltitude+event.deltaY*0.0015));
         };
         const lost = () => { if (drag.current.active) { camera.current.vx = 0; camera.current.vy = 0; } drag.current.active = false; element.classList.remove("is-dragging"); };
         canvas.addEventListener("pointerdown", down); canvas.addEventListener("pointermove", move);
@@ -184,9 +196,10 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
 
   useEffect(() => {
     if (!api.current) return;
-    api.current.htmlElementsData(events).ringsData(reducedMotion.current ? [] : events);
+    const localEvents = events.filter(e => e.country === selectedCountry);
+    api.current.htmlElementsData(localEvents).ringsData(reducedMotion.current ? [] : localEvents);
 
-  }, [events]);
+  }, [events, selectedCountry]);
 
   useEffect(() => { repaint.current(); }, [selectedCountry]);
 
@@ -195,26 +208,32 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
   useEffect(() => {
     if (!command) return;
     const c = camera.current;
+    if (command.action === "in" || command.action === "out") overview.current.active = false;
     if (command.action === "in") c.targetAltitude = Math.max(.16, c.targetAltitude/1.28);
-    if (command.action === "out") c.targetAltitude = Math.min(3.3, c.targetAltitude*1.28);
-    if (command.action === "reset") { flight.current = { lat: 21, lng: 68 }; c.targetAltitude = 1.65; c.vx = -1.7; c.vy = 0; c.direction = -1; }
-    if (command.action === "focus") { c.vx = 0; c.vy = 0; c.targetAltitude = Math.min(c.targetAltitude, .65); flight.current = { lat: command.lat ?? 21, lng: command.lng ?? 68 }; }
+    if (command.action === "out") c.targetAltitude = Math.min(Math.max(3.3, overview.current.altitude*1.35), c.targetAltitude*1.28);
+    if (command.action === "reset") { overview.current.active = true; flight.current = { lat: 21, lng: 68 }; c.targetAltitude = overview.current.altitude; c.vx = spin.current ? c.direction*1.7 : 0; c.vy = 0; }
+    if (command.action === "focus") { overview.current.active = false; c.vx = 0; c.vy = 0; c.targetAltitude = Math.min(c.targetAltitude, .65); flight.current = { lat: command.lat ?? 21, lng: command.lng ?? 68 }; }
     if (command.action === "country" && command.code) focusCountry.current(command.code);
   }, [command]);
 
   return <div className="globe-wrap">
     <div ref={host} className="globe-canvas" data-testid="globe" tabIndex={0} role="application"
-      aria-label="交互地球。方向键旋转，加减键缩放；也可按住鼠标或单指拖动，松手后惯性旋转。点击国家放大，或使用上方地区选择器。事件可从右侧列表访问。"
+      aria-label="交互地球。方向键旋转，加减键缩放，空格暂停或继续自转，Home 返回全球，Enter 选择地区。也可拖动地球、悬停预览、点击国家放大。"
       onKeyDown={event => {
+        if (event.target !== event.currentTarget) return;
         const c = camera.current;
         flight.current = null;
+        if (event.key === "Home") { event.preventDefault(); callbacks.current.onReset(); return; }
+        if (event.key === " ") { event.preventDefault(); callbacks.current.onToggleSpin(); return; }
+        if (event.key === "Enter") { event.preventDefault(); (document.querySelector(".keyboard-region-picker select") as unknown as HTMLSelectElement | null)?.focus(); return; }
+        if (["+", "-", "="].includes(event.key)) overview.current.active = false;
         if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "+", "-", "="].includes(event.key)) event.preventDefault();
         if (event.key === "ArrowLeft") { c.lng += 8; c.direction = 1; }
         if (event.key === "ArrowRight") { c.lng -= 8; c.direction = -1; }
         if (event.key === "ArrowUp") c.lat = Math.min(78, c.lat+8);
         if (event.key === "ArrowDown") c.lat = Math.max(-78, c.lat-8);
         if (event.key === "+" || event.key === "=") c.targetAltitude = Math.max(.16, c.targetAltitude/1.28);
-        if (event.key === "-") c.targetAltitude = Math.min(3.3, c.targetAltitude*1.28);
+        if (event.key === "-") c.targetAltitude = Math.min(Math.max(3.3, overview.current.altitude*1.35), c.targetAltitude*1.28);
       }} />
     {status === "loading" && <div className="globe-status"><LoaderCircle className="loading-icon" size={28}/><p>展开世界地图…</p></div>}
     {status === "error" && <div className="globe-status"><p>地球暂时未能加载</p><span>请确认浏览器已开启图形加速，或重新加载。</span><button className="text-button" onClick={() => setAttempt(a => a+1)}><RotateCcw size={16}/>重新加载</button></div>}
