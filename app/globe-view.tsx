@@ -52,6 +52,11 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
         let keyboardReading=false;
         let cursor = { x: 0, y: 0 };
         const palette = countryPalette(features);
+        const viewport=()=>{
+          const width=element.clientWidth, height=element.clientHeight;
+          const footer=parseFloat(getComputedStyle(element).getPropertyValue("--globe-footer")) || 116;
+          return {width,height,footer,availableHeight:Math.max(160,height-footer)};
+        };
         const colors = (f: object) => countryCode(f as CountryFeature) === selectedCode.current ? "#ddbd78" : f === hovered ? "#c9d8c4" : palette.get(countryCode(f as CountryFeature))!;
         const surfaceAltitude = (f: object) => countryCode(f as CountryFeature) === selectedCode.current ? .012 : f === hovered ? .009 : .005;
         const stroke = (f: object) => countryCode(f as CountryFeature) === selectedCode.current ? "#fff1ca" : f === hovered ? "#eff3df" : "#263e43";
@@ -65,7 +70,9 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
         });
         const selectCountry = (f: CountryFeature, point?: {lat: number; lng: number}) => {
           overview.current.active = false;
-          const view = countryView(f, element.clientWidth/element.clientHeight, globe.camera().fov, point);
+          const {width,height,availableHeight}=viewport();
+          const effectiveFov=2*Math.atan(Math.tan(globe.camera().fov*Math.PI/360)*availableHeight/height)*180/Math.PI;
+          const view = countryView(f, width/availableHeight, effectiveFov, point);
           camera.current.vx = 0; camera.current.vy = 0;
           camera.current.targetAltitude = view.altitude;
           flight.current = { lat: view.lat, lng: view.lng };
@@ -75,7 +82,10 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
           callbacks.current.onRegionSelect(countryRegion(f));
         };
         const globe: any = new Globe(element, { animateIn: false, rendererConfig: { antialias: true, alpha: true } })
-          .backgroundColor("rgba(0,0,0,0)")
+          .backgroundColor("#020408")
+          // Globe.GL wraps this texture around the scene. The globe and the
+          // surrounding stars share the same camera during drag and inertia.
+          .backgroundImageUrl("/textures/night-sky.png")
           .width(element.clientWidth).height(element.clientHeight)
           .globeMaterial(new THREE.MeshPhongMaterial({ color: "#122d3a", shininess: 9, specular: "#1f4653" }))
           .showAtmosphere(true).atmosphereColor("#658d9b").atmosphereAltitude(0.08)
@@ -113,10 +123,12 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
         controls.enableRotate = false; controls.enableZoom = false; controls.enablePan = false;
         controls.enableDamping = false; controls.autoRotate = false;
         const fitOverview = () => {
-          const w = element.clientWidth, h = element.clientHeight;
-          const padding = Math.min(24, Math.min(w,h)*.04);
+          const {width:w,height:h,footer,availableHeight}=viewport();
+          const padding = Math.min(24, Math.min(w,availableHeight)*.04);
+          // Keep the globe above the timeline while the sky fills the canvas.
+          globe.globeOffset([0,-footer/2]);
           const tangent = Math.tan(globe.camera().fov*Math.PI/360);
-          const k = Math.min(tangent*(1-2*padding/h), tangent*(w/h)*(1-2*padding/w));
+          const k = Math.min(tangent*(availableHeight-2*padding)/h, tangent*(w-2*padding)/h);
           overview.current.altitude = 1.08*Math.sqrt(1+1/(k*k))-1;
           if (overview.current.active) camera.current.targetAltitude = overview.current.altitude;
         };
