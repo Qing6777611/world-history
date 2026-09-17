@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, RotateCcw } from "lucide-react";
 import type { AtlasEvent } from "./demo-data";
-import { countryCode, countryRegion, countryPalette, countryView, type CountryFeature, type CountryRegion } from "./country-geometry";
+import { atlasCountries, countryCode, countryRegion, countryPalette, countryView, type CountryFeature, type CountryRegion } from "./country-geometry";
 
 export type GlobeCommand = { id: number; action: "in" | "out" | "reset" | "focus" | "country"; lat?: number; lng?: number; code?: string };
 export type HoverInfo = { name: string; kind: "country" | "event"; events: AtlasEvent[]; x: number; y: number } | null;
@@ -41,10 +41,11 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
         ]);
         if (cancelled || !host.current) return;
         const element = host.current;
+        const features = atlasCountries(geography.features);
         reducedMotion.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         let hovered: any = null;
         let cursor = { x: 0, y: 0 };
-        const palette = countryPalette(geography.features);
+        const palette = countryPalette(features);
         const colors = (f: object) => countryCode(f as CountryFeature) === selectedCode.current ? "#ddbd78" : f === hovered ? "#c9d8c4" : palette.get(countryCode(f as CountryFeature))!;
         const surfaceAltitude = (f: object) => countryCode(f as CountryFeature) === selectedCode.current ? .012 : f === hovered ? .009 : .005;
         const stroke = (f: object) => countryCode(f as CountryFeature) === selectedCode.current ? "#fff1ca" : f === hovered ? "#eff3df" : "#263e43";
@@ -65,7 +66,7 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
           .globeMaterial(new THREE.MeshPhongMaterial({ color: "#122d3a", shininess: 9, specular: "#1f4653" }))
           .showAtmosphere(true).atmosphereColor("#658d9b").atmosphereAltitude(0.08)
           .showGraticules(false)
-          .polygonsData(geography.features)
+          .polygonsData(features)
           .polygonAltitude(surfaceAltitude).polygonCapColor(colors).polygonSideColor(() => "#203c43")
           .polygonStrokeColor(stroke).polygonsTransitionDuration(reducedMotion.current ? 0 : 230)
           .htmlElementsData(data.current.filter(e => e.country === selectedCode.current)).htmlLat("lat").htmlLng("lng").htmlAltitude(0.035)
@@ -96,8 +97,8 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
             selectCountry(f as CountryFeature, point);
           });
         repaint.current = () => globe.polygonCapColor(colors).polygonAltitude(surfaceAltitude).polygonStrokeColor(stroke);
-        focusCountry.current = code => { const f = geography.features.find(f => countryCode(f) === code); if (f) selectCountry(f); };
-        callbacks.current.onCountriesReady(geography.features.map(countryRegion).sort((a,b) => a.name.localeCompare(b.name,"zh-CN")));
+        focusCountry.current = code => { const f = features.find(f => countryCode(f) === code); if (f) selectCountry(f); };
+        callbacks.current.onCountriesReady(features.map(countryRegion).sort((a,b) => a.name.localeCompare(b.name,"zh-CN")));
         api.current = globe;
         globe.renderer().setPixelRatio(Math.min(window.devicePixelRatio, 2));
         const controls = globe.controls();

@@ -7,8 +7,21 @@ export type CountryRegion = { code: string; name: string };
 const RAD = Math.PI / 180;
 const normalize = (lng: number) => ((lng + 180) % 360 + 360) % 360 - 180;
 export const countryCode = (f: CountryFeature) => f.properties.ISO_A3_EH && f.properties.ISO_A3_EH !== "-99" ? f.properties.ISO_A3_EH : f.properties.ADM0_A3;
-export const countryRegion = (f: CountryFeature): CountryRegion => ({ code: countryCode(f), name: ({CHN:"中国", TWN:"台湾地区", KOR:"韩国", PRK:"朝鲜"} as Record<string,string>)[countryCode(f)] || f.properties.NAME_ZH || f.properties.NAME_EN });
+export const countryRegion = (f: CountryFeature): CountryRegion => ({ code: countryCode(f), name: ({CHN:"中国", KOR:"韩国", PRK:"朝鲜"} as Record<string,string>)[countryCode(f)] || f.properties.NAME_ZH || f.properties.NAME_EN });
 const polygons = (f: CountryFeature) => f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
+
+// The atlas groups Taiwan with China. Merge before rendering so colors,
+// hover, selection, camera fitting and the region picker share one feature.
+export function atlasCountries(features: CountryFeature[]): CountryFeature[] {
+  const china = features.find(f => countryCode(f) === "CHN");
+  const taiwan = features.find(f => countryCode(f) === "TWN");
+  if (!china || !taiwan) return features;
+  return features.filter(f => f !== taiwan).map(f => f === china ? {
+    ...china,
+    geometry: { type: "MultiPolygon", coordinates: [...polygons(china), ...polygons(taiwan)] },
+  } : f);
+}
+
 function angularDistance(a: Coordinate, b: Coordinate) {
   const h = Math.sin((a[1]-b[1])*RAD/2)**2 + Math.cos(a[1]*RAD)*Math.cos(b[1]*RAD)*Math.sin((a[0]-b[0])*RAD/2)**2;
   return 2*Math.asin(Math.sqrt(Math.min(1, h)));
