@@ -1,11 +1,16 @@
 // Illustrative scenarios; replace this module with sourced historical records.
 export type AtlasEvent = {
   id: string; title: string; location: string; region: string; country: string;
-  lat: number; lng: number; start: number; end: number;
+  lat?: number; lng?: number; start: number; end: number;
   category: "交流" | "文化" | "社会" | "科技"; summary: string; color: string;
+  historical?: { year: number; month: number; day: number; sourceUrl: string; locationUrl?: string; locationEntity?: string };
 };
 export const CATEGORY_COLORS = { "交流": "#d3b580", "文化": "#8ec4b2", "社会": "#99b3d6", "科技": "#baa8d2" };
-export const getCurrentYear = () => new Date().getUTCFullYear();
+export const getCurrentYear = () => new Date().getFullYear();
+export function localToday(now = new Date()) { return timestamp(now.getFullYear(), now.getMonth()+1, now.getDate()); }
+export function hasCoordinates(event: AtlasEvent): event is AtlasEvent & { lat: number; lng: number } {
+  return Number.isFinite(event.lat) && Number.isFinite(event.lng);
+}
 export function periodsThrough(endYear = getCurrentYear()) { return [
   { start: -500, end: 499, name: "古典世界", subtitle: "文明的相遇", themes: ["城邦生活", "思想与学问", "陆路交流", "聚落与社会"] },
   { start: 500, end: 999, name: "文明交汇", subtitle: "交织的道路", themes: ["城市与商路", "知识的流动", "文化与信仰", "区域间的交流"] },
