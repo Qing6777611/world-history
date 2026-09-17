@@ -13,9 +13,11 @@ import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTi
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import GlobeView, { type GlobeCommand, type HoverInfo } from "./globe-view";
 import type { CountryRegion } from "./country-geometry";
-import { DAY, MAX_TIME, MIN_TIME, clampTime, dateParts, eventsAt, timestamp, yearLabel, type AtlasEvent } from "./demo-data";
+import { DAY, getCurrentYear, getMaxTime, MIN_TIME, clampTime, dateParts, eventsAt, timestamp, yearLabel, type AtlasEvent } from "./demo-data";
 
-export default function HistoryAtlas() {
+export default function HistoryAtlas({initialYear}: {initialYear: number}) {
+  const [maxYear, setMaxYear] = useState(initialYear);
+  const maxTime = getMaxTime(maxYear);
   const [time, setTime] = useState(timestamp(1450, 6, 15));
   const [spinning, setSpinning] = useState(true);
   const [region, setRegion] = useState<CountryRegion | null>(null);
@@ -31,14 +33,22 @@ export default function HistoryAtlas() {
   const regionRef = useRef(region); regionRef.current = region;
   const globeArea = useRef<HTMLDivElement>(null);
   const parts = dateParts(time);
-  const events = useMemo(() => eventsAt(time), [parts.year]);
+  const events = useMemo(() => eventsAt(time, maxYear), [parts.year, maxYear]);
   const regionEvents = region ? events.filter(e => e.country === region.code) : [];
-  const changeTime = useCallback((t: number) => { setTime(clampTime(Math.round(t/DAY)*DAY)); setHover(null); }, []);
+  const changeTime = useCallback((t: number) => { setTime(clampTime(Math.round(t/DAY)*DAY, maxYear)); setHover(null); }, [maxYear]);
   const sendCommand = useCallback((action: GlobeCommand["action"], lat?: number, lng?: number) => setCommand({ id: performance.now(), action, lat, lng }), []);
   const selectRegion = useCallback((next: CountryRegion) => { setRegion(next); setRegionSpinning(false); setHover(null); }, []);
   const returnToWorld = useCallback(() => { setRegion(null); setHover(null); sendCommand("reset"); }, [sendCommand]);
   const selectEvent = useCallback((event: AtlasEvent) => { setSelected({ event, time: timeRef.current }); setHover(null); sendCommand("focus", event.lat, event.lng); }, [sendCommand]);
 
+  useEffect(() => {
+    // Use the server's year for hydration, then refresh if the page spans New Year.
+    const refresh = () => setMaxYear(getCurrentYear());
+    refresh();
+    window.addEventListener("focus", refresh);
+    const timer = window.setInterval(refresh, 60_000);
+    return () => { window.removeEventListener("focus", refresh); window.clearInterval(timer); };
+  }, []);
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem("world-atlas-state") || "null");
@@ -69,12 +79,12 @@ export default function HistoryAtlas() {
     if (!context?.registerTool) return;
     const lifecycle = new AbortController();
     const register = (tool: unknown) => { try { Promise.resolve(context.registerTool(tool, { signal: lifecycle.signal })).catch(() => {}); } catch {} };
-    register({ name: "read_atlas_state", description: "Read the selected date, region and illustrative events. All events are demo scenarios, not verified history.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true }, execute() { return { date: dateParts(timeRef.current), region:regionRef.current, demo:true, events:eventsAt(timeRef.current).filter(e => !regionRef.current || e.country === regionRef.current.code).map(e => ({id:e.id,title:e.title,location:e.location})) }; } });
-    register({ name: "navigate_history_date", description: "Change the visible globe and timeline to a date. Negative years mean BCE; no year zero. Supports -500 through 2025.", inputSchema: { type:"object", properties:{year:{type:"integer",minimum:-500,maximum:2025},month:{type:"integer",minimum:1,maximum:12},day:{type:"integer",minimum:1,maximum:31}}, required:["year","month","day"],additionalProperties:false }, annotations:{readOnlyHint:false}, execute(input:{year:number;month:number;day:number}) { const {year,month,day}=input; if (![year,month,day].every(Number.isInteger) || year===0 || year < -500 || year > 2025) throw new Error("Invalid historical date"); const t=timestamp(year,month,day), checked=dateParts(t); if (checked.year!==year || checked.month!==month || checked.day!==day) throw new Error("Invalid calendar date"); flushSync(()=>changeTime(t)); return {date:checked,demo:true}; } });
+    register({ name: "read_atlas_state", description: "Read the selected date, region and illustrative events. All events are demo scenarios, not verified history.", inputSchema: { type: "object", properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true }, execute() { return { date: dateParts(timeRef.current), region:regionRef.current, demo:true, events:eventsAt(timeRef.current, maxYear).filter(e => !regionRef.current || e.country === regionRef.current.code).map(e => ({id:e.id,title:e.title,location:e.location})) }; } });
+    register({ name: "navigate_history_date", description: `Change the visible globe and timeline to a date. Negative years mean BCE; no year zero. Supports -500 through ${maxYear}.`, inputSchema: { type:"object", properties:{year:{type:"integer",minimum:-500,maximum:maxYear},month:{type:"integer",minimum:1,maximum:12},day:{type:"integer",minimum:1,maximum:31}}, required:["year","month","day"],additionalProperties:false }, annotations:{readOnlyHint:false}, execute(input:{year:number;month:number;day:number}) { const {year,month,day}=input; if (![year,month,day].every(Number.isInteger) || year===0 || year < -500 || year > maxYear) throw new Error("Invalid historical date"); const t=timestamp(year,month,day), checked=dateParts(t); if (checked.year!==year || checked.month!==month || checked.day!==day) throw new Error("Invalid calendar date"); flushSync(()=>changeTime(t)); return {date:checked,demo:true}; } });
     return () => lifecycle.abort();
-  }, [changeTime]);
+  }, [changeTime, maxYear]);
 
-  const percent = (time-MIN_TIME)/(MAX_TIME-MIN_TIME)*100;
+  const percent = (time-MIN_TIME)/(maxTime-MIN_TIME)*100;
   return <main className="atlas-app">
     <h1 className="sr-only">纪元 · 世界历史地图</h1>
     <section className="globe-area" ref={globeArea} aria-label="世界历史探索">
@@ -87,8 +97,8 @@ export default function HistoryAtlas() {
 
     <section className="timeline" aria-label="历史时间轴">
       <button className="current-year" onClick={()=>{setDateOpen(true);setDateError("");}} aria-label={`当前${yearLabel(parts.year)} ${parts.month}月${parts.day}日，点击修改日期`} title="点击修改日期">{parts.year < 0 && <span>公元前 </span>}{Math.abs(parts.year)}<span> 年</span></button>
-      <div className="timeline-line"><Slider className="time-slider" min={MIN_TIME} max={MAX_TIME} step={DAY} value={[time]} aria-label="历史日期" onValueChange={v=>changeTime(v[0])}/><div className="timeline-ticks" aria-hidden="true">{[-500,1,500,1000,1500,2025].map(year=><i key={year} style={{left:`${(timestamp(year)-MIN_TIME)/(MAX_TIME-MIN_TIME)*100}%`}}/>)}</div></div>
-      <div className="timeline-ends" aria-hidden="true"><span>公元前 500 年</span><span>2025 年</span></div>
+      <div className="timeline-line"><Slider className="time-slider" min={MIN_TIME} max={maxTime} step={DAY} value={[time]} aria-label="历史日期" onValueChange={v=>changeTime(v[0])}/><div className="timeline-ticks" aria-hidden="true">{[-500,1,500,1000,1500,maxYear].map(year=><i key={year} style={{left:`${(timestamp(year)-MIN_TIME)/(maxTime-MIN_TIME)*100}%`}}/>)}</div></div>
+      <div className="timeline-ends" aria-hidden="true"><span>公元前 500 年</span><span>{maxYear} 年</span></div>
       <span className="sr-only">当前进度 {Math.round(percent)}%。方向键逐日调整，点击年份可输入准确日期。</span>
     </section>
 
@@ -96,8 +106,8 @@ export default function HistoryAtlas() {
     <Dialog open={dateOpen} onOpenChange={setDateOpen}><DialogContent className="atlas-dialog"><DialogHeader><DialogTitle>选择日期</DialogTitle><DialogDescription>负数表示公元前，没有公元 0 年。</DialogDescription></DialogHeader><form onSubmit={event=>{
       event.preventDefault(); const form=new FormData(event.currentTarget), year=Number(form.get("year")), month=Number(form.get("month")), day=Number(form.get("day"));
       const t=timestamp(year,month,day), checked=dateParts(t);
-      if (!Number.isInteger(year) || year===0 || year < -500 || year > 2025 || checked.year!==year || checked.month!==month || checked.day!==day) {setDateError("请输入公元前 500 年至公元 2025 年之间的有效日期。");return;}
+      if (!Number.isInteger(year) || year===0 || year < -500 || year > maxYear || checked.year!==year || checked.month!==month || checked.day!==day) {setDateError(`请输入公元前 500 年至公元 ${maxYear} 年之间的有效日期。`);return;}
       changeTime(t);setDateOpen(false);
-    }}><div className="date-fields"><label>年份<input name="year" type="number" required min="-500" max="2025" defaultValue={parts.year} aria-describedby={dateError ? "date-error" : undefined}/></label><label>月<input name="month" type="number" required min="1" max="12" defaultValue={parts.month}/></label><label>日<input name="day" type="number" required min="1" max="31" defaultValue={parts.day}/></label></div>{dateError && <p id="date-error" className="form-error" role="alert">{dateError}</p>}<button className="primary-button" type="submit">前往<ArrowRight size={16}/></button></form></DialogContent></Dialog>
+    }}><div className="date-fields"><label>年份<input name="year" type="number" required min="-500" max={maxYear} defaultValue={parts.year} aria-describedby={dateError ? "date-error" : undefined}/></label><label>月<input name="month" type="number" required min="1" max="12" defaultValue={parts.month}/></label><label>日<input name="day" type="number" required min="1" max="31" defaultValue={parts.day}/></label></div>{dateError && <p id="date-error" className="form-error" role="alert">{dateError}</p>}<button className="primary-button" type="submit">前往<ArrowRight size={16}/></button></form></DialogContent></Dialog>
   </main>;
 }

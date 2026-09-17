@@ -1,2 +1,3 @@
 import HistoryAtlas from "./history-atlas";
-export default function Home() { return <HistoryAtlas />; }
+import { getCurrentYear } from "./demo-data";
+export default function Home() { return <HistoryAtlas initialYear={getCurrentYear()} />; }
