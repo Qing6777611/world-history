@@ -8,7 +8,7 @@ export const featurePolygons = (f: CountryFeature) => f.geometry.type === "Polyg
 const wrapped = (angle: number) => ((angle + 180) % 360 + 360) % 360 - 180;
 
 // Globe.GL's spherical polygons use clockwise exterior rings. DataV and
-// geoBoundaries use the opposite convention; normalize without moving points.
+// other sources may use the opposite convention; normalize without moving points.
 export function orientDivision(feature: AdminFeature): AdminFeature {
   for(const polygon of featurePolygons(feature)) {
     polygon.forEach((ring,index)=>{
@@ -47,13 +47,6 @@ export function featureCenter(f: CountryFeature) {
   const candidate = area ? {lng:wrapped(x/(3*area)),lat:y/(3*area)} : {lng:ring[0][0],lat:ring[0][1]};
   return containsPlace(f,candidate) ? candidate : {lng:ring[0][0],lat:ring[0][1]};
 }
-export function childBelongsTo(child: CountryFeature, parent: CountryFeature) {
-  if(containsPlace(parent,featureCenter(child))) return true;
-  const ring=featurePolygons(child).reduce((a,b)=>a[0].length>b[0].length?a:b)[0];
-  const samples=ring.filter((_,i)=>i%Math.max(1,Math.floor(ring.length/12))===0);
-  return samples.filter(([lng,lat])=>containsPlace(parent,{lat,lng})).length > samples.length*.55;
-}
-
 export function adminColor(id: string) {
   const colors=["#94a99b","#afa68c","#8fabb4","#ac9ca9","#a5b28f","#b0a08c"];
   let hash=0; for(const char of id) hash=(hash*31+char.charCodeAt(0))|0;
@@ -61,31 +54,14 @@ export function adminColor(id: string) {
 }
 
 const cache = new Map<string, AdminCollection>();
-export async function loadDivisions(country: string, parent: AdminFeature | null, signal: AbortSignal): Promise<AdminCollection> {
-  const key = country + (parent ? `-${parent.properties.id}` : "");
-  if(cache.has(key)) return cache.get(key)!;
-  let data: AdminCollection;
-  if(!parent || country === "CHN") {
-    const response=await fetch(`/data/boundaries/${key}.json`,{signal});
-    if(response.status===404) return {features:[],source:"Natural Earth",sourceUrl:"https://www.naturalearthdata.com/",label:"行政区划"};
-    if(!response.ok) throw new Error("边界暂时无法加载");
-    data=await response.json();
-  } else {
-    const countryKey=`${country}-ADM2`;
-    let all=cache.get(countryKey);
-    if(!all) {
-      // A locally prepared layer is available for the most frequently used map.
-      const response=await fetch(country==="USA" ? "/data/boundaries/USA-ADM2.json" : `/api/boundaries?country=${country}`,{signal});
-      if(!response.ok) throw new Error("此地区的下一级边界暂时无法加载");
-      all=await response.json() as AdminCollection;
-      all.features=all.features.map(orientDivision);
-      if(cache.size>28) cache.delete(cache.keys().next().value!);
-      cache.set(countryKey,all);
-    }
-    data={...all,features:all.features.filter(f=>childBelongsTo(f,parent))};
-  }
+export async function loadDivisions(country: string, signal: AbortSignal): Promise<AdminCollection> {
+  if(cache.has(country)) return cache.get(country)!;
+  const response=await fetch(`/data/boundaries/${country}.json`,{signal});
+  if(response.status===404) return {features:[],source:"Natural Earth",sourceUrl:"https://www.naturalearthdata.com/",label:"省／州级行政区"};
+  if(!response.ok) throw new Error("边界暂时无法加载");
+  const data: AdminCollection=await response.json();
   data.features=data.features.map(orientDivision);
   if(cache.size>28) cache.delete(cache.keys().next().value!);
-  cache.set(key,data);
+  cache.set(country,data);
   return data;
 }

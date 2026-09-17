@@ -3,11 +3,8 @@
 Inputs: Natural Earth populated places / admin-1 GeoJSON and DataV China
 province GeoJSON. Original downloads stay outside the checkout.
 """
-import concurrent.futures
 import json
-import math
 from pathlib import Path
-from urllib.request import urlopen
 
 ROOT = Path(__file__).resolve().parents[1] / 'public' / 'data'
 BOUNDARIES = ROOT / 'boundaries'
@@ -59,29 +56,11 @@ for code, features in grouped.items():
     write(BOUNDARIES / (code+'.json'), collection(features,'Natural Earth','https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-1-states-provinces/','省／州级行政区'))
 
 provinces = [f for f in json.load(open('/tmp/atlas-china-provinces.json'))['features'] if f['properties']['name']]
-def china_feature(f, level):
+def china_feature(f):
     p=f['properties']
-    return {'type':'Feature','properties':{'id':str(p['adcode']),'name':p['name'],'country':'CHN','level':str(level)},'geometry':geometry(f['geometry'],.004 if level==2 else .012)}
-write(BOUNDARIES/'CHN.json',collection([china_feature(f,1) for f in provinces],'DataV.GeoAtlas','https://datav.aliyun.com/tools/atlas/','省级行政区'))
+    return {'type':'Feature','properties':{'id':str(p['adcode']),'name':p['name'],'country':'CHN','level':'1'},'geometry':geometry(f['geometry'])}
+write(BOUNDARIES/'CHN.json',collection([china_feature(f) for f in provinces],'DataV.GeoAtlas','https://datav.aliyun.com/tools/atlas/','省级行政区'))
 
-def china_children(province):
-    p=province['properties']; code=p['adcode']
-    fallback={710000:'TWN',810000:'HKG',820000:'MAC'}.get(code)
-    if fallback:
-        features=[{'type':'Feature','properties':{'id':f['properties']['adm1_code'],'name':f['properties'].get('name_zh') or f['properties']['name'],'country':'CHN','level':'2'},'geometry':geometry(f['geometry'],.004)} for f in natural if f['properties']['adm0_a3']==fallback]
-        data=collection(features,'Natural Earth','https://www.naturalearthdata.com/','市／县／区级行政区')
-    else:
-        url=f'https://geo.datav.aliyun.com/areas_v3/bound/{code}_full.json'
-        with urlopen(url,timeout=40) as response:
-            raw=json.load(response)
-        features=[china_feature(f,2) for f in raw['features'] if f['properties'].get('name')]
-        data=collection(features,'DataV.GeoAtlas','https://datav.aliyun.com/tools/atlas/','市级行政区' if code not in [110000,120000,310000,500000] else '区／县级行政区')
-    write(BOUNDARIES/f'CHN-{code}.json',data)
-    return p['name'],len(features)
-
-with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
-    for result in pool.map(china_children,provinces):
-        print(result,flush=True)
 
 cities=[]
 for f in json.load(open('/tmp/atlas-populated-places.geojson'))['features']:

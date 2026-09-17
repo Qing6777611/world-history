@@ -12,7 +12,7 @@ import { atlasCountries, countryCode, countryRegion, countryPalette, countryView
 
 export type GlobeCommand = { id: number; action: "in" | "out" | "reset" | "focus" | "country" | "back"; lat?: number; lng?: number; code?: string };
 export type HoverInfo = { name: string; kind: "country" | "event" | "division" | "city"; events: AtlasEvent[]; x: number; y: number; hint?: string } | null;
-type GeographyView = { country: string; parent: AdminFeature | null; child: AdminFeature | null; choices: AdminFeature[]; status: "loading" | "ready" | "error"; label: string; source: string; sourceUrl: string };
+type GeographyView = { country: string; province: AdminFeature | null; choices: AdminFeature[]; status: "loading" | "ready" | "error"; label: string; source: string; sourceUrl: string };
 type Props = { events: AtlasEvent[]; spinning: boolean; command: GlobeCommand | null; onSelect: (events: AtlasEvent[]) => void; onHover: (info: HoverInfo) => void; selectedCountry: string | null; onRegionSelect: (region: CountryRegion) => void; onCountriesReady: (regions: CountryRegion[]) => void; onReset: () => void; onToggleSpin: () => void };
 
 // Rotation uses one camera state: direct pointer input wins over idle spin.
@@ -28,7 +28,7 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
   const repaint = useRef(() => {});
   const focusCountry = useRef<(code: string) => void>(() => {});
   const syncGeography = useRef(() => {});
-  const navigation = useRef({ back:()=>{}, country:()=>{}, parent:()=>{}, choose:(_id:string)=>{}, retry:()=>{} });
+  const navigation = useRef({ back:()=>{}, country:()=>{}, choose:(_id:string)=>{}, retry:()=>{} });
   const spin = useRef(spinning);
   const overview = useRef({ altitude: 1.65, active: true });
   const camera = useRef({ lat: 21, lng: 68, altitude: 1.65, targetAltitude: 1.65, vx: -1.7, vy: 0, direction: -1 });
@@ -58,8 +58,8 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
         let closeBubble=()=>{};
         let bubbleNodes:HTMLElement[]=[];
         let geographyNodes:HTMLElement[]=[];
-        let adminParent:AdminFeature|null=null, adminChild:AdminFeature|null=null;
-        let divisions:AdminFeature[]=[], provinceFeatures:AdminFeature[]=[];
+        let selectedProvince:AdminFeature|null=null;
+        let divisions:AdminFeature[]=[];
         let boundaries:AdminCollection={features:[],source:"",sourceUrl:"",label:"省／州级行政区"};
         let boundaryStatus:GeographyView["status"]="ready", boundaryRequest:AbortController|null=null;
         let boundaryVersion=0;
@@ -81,12 +81,12 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
           const footer=parseFloat(getComputedStyle(element).getPropertyValue("--globe-footer")) || 116;
           return {width,height,footer,availableHeight:Math.max(160,height-footer)};
         };
-        const colors = (f: CountryFeature) => isAdmin(f) ? f===adminChild ? "#ddbd78" : f===hovered ? "#d4dec7" : adminParent && f.properties.level==="1" && f!==adminParent ? "#899d95" : adminColor(f.properties.id) : countryCode(f)===selectedCode.current ? "#a9ad96" : f===hovered ? "#c9d8c4" : palette.get(countryCode(f))!;
-        const surfaceAltitude = (f: CountryFeature) => altitudeScale*(isAdmin(f) ? f.properties.level==="2" ? .012 : .009 : countryCode(f)===selectedCode.current ? .005 : f===hovered ? .007 : .004);
-        const stroke = (f: CountryFeature) => isAdmin(f) ? f===hovered || f===adminChild ? "#fff1ca" : "#e1e8d980" : countryCode(f)===selectedCode.current ? "#e3d4a0" : "#263e43";
+        const colors = (f: CountryFeature) => isAdmin(f) ? f===selectedProvince ? "#ddbd78" : f===hovered ? "#d4dec7" : selectedProvince && f!==selectedProvince ? "#899d95" : adminColor(f.properties.id) : countryCode(f)===selectedCode.current ? "#a9ad96" : f===hovered ? "#c9d8c4" : palette.get(countryCode(f))!;
+        const surfaceAltitude = (f: CountryFeature) => altitudeScale*(isAdmin(f) ? .009 : countryCode(f)===selectedCode.current ? .005 : f===hovered ? .007 : .004);
+        const stroke = (f: CountryFeature) => isAdmin(f) ? f===hovered || f===selectedProvince ? "#fff1ca" : "#e1e8d980" : countryCode(f)===selectedCode.current ? "#e3d4a0" : "#263e43";
         const localCities=()=>{
           if(!selectedCode.current)return globalCities;
-          return cities.filter(city=>city.country===selectedCode.current && (!adminParent || containsPlace(adminParent,city)) && (!adminChild || containsPlace(adminChild,city))).slice(0,adminParent ? 100 : 60);
+          return cities.filter(city=>city.country===selectedCode.current && (!selectedProvince || containsPlace(selectedProvince,city))).slice(0,selectedProvince ? 100 : 60);
         };
         const bubbleData=():GlobeBubble[]=>countryMessages(data.current,selectedCode.current).map(group=>{
           const feature=features.find(f=>countryCode(f)===group.country);
@@ -110,28 +110,26 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
         };
         const publishGeography=()=>{
           const country=features.find(f=>countryCode(f)===selectedCode.current);
-          setGeographyView(country ? {country:countryRegion(country).name,parent:adminParent,child:adminChild,choices:divisions,status:boundaryStatus,label:boundaries.label,source:boundaries.source,sourceUrl:boundaries.sourceUrl} : null);
+          setGeographyView(country ? {country:countryRegion(country).name,province:selectedProvince,choices:divisions,status:boundaryStatus,label:boundaries.label,source:boundaries.source,sourceUrl:boundaries.sourceUrl} : null);
         };
         const refreshGeography=()=>{
           // Detailed provinces replace the coarse country silhouette after
-          // loading, so coastlines remain accurate when exploring a city.
-          const countries=features.filter(f=>!provinceFeatures.length || countryCode(f)!==selectedCode.current);
-          const detail=adminParent ? [...provinceFeatures,...divisions] : divisions.length ? divisions : provinceFeatures;
-          globe.polygonsData([...countries,...detail]);
+          // loading, so coastlines remain accurate when exploring a province.
+          const countries=features.filter(f=>!divisions.length || countryCode(f)!==selectedCode.current);
+          globe.polygonsData([...countries,...divisions]);
           updateBubbles.current();repaint.current();publishGeography();
         };
-        const showDivisions=async(parent:AdminFeature|null)=>{
+        const showDivisions=async()=>{
           boundaryRequest?.abort();const controller=new AbortController();boundaryRequest=controller;
           const version=++boundaryVersion, code=selectedCode.current;
           if(!code)return;
-          adminParent=parent;adminChild=null;divisions=[];boundaryStatus="loading";
-          boundaries={...boundaries,label:parent ? "市／县级行政区" : "省／州级行政区"};
+          selectedProvince=null;divisions=[];boundaryStatus="loading";
+          boundaries={features:[],source:"",sourceUrl:"",label:"省／州级行政区"};
           refreshGeography();
           try {
-            const result=await loadDivisions(code,parent,controller.signal);
+            const result=await loadDivisions(code,controller.signal);
             if(cancelled || controller.signal.aborted || version!==boundaryVersion)return;
             boundaries=result;divisions=result.features;
-            if(!parent)provinceFeatures=divisions;
             boundaryStatus="ready";refreshGeography();
           } catch {
             if(controller.signal.aborted || version!==boundaryVersion)return;
@@ -139,31 +137,24 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
           }
         };
         const selectCountry = (f: CountryFeature, point?: {lat: number; lng: number}) => {
-          selectedCode.current=countryCode(f);provinceFeatures=[];
+          selectedCode.current=countryCode(f);
           flyToFeature(f,point);
           callbacks.current.onRegionSelect(countryRegion(f));
-          void showDivisions(null);
+          void showDivisions();
         };
         const selectDivision=(f:AdminFeature,point?:{lat:number;lng:number})=>{
           closeBubble();flyToFeature(f,point);
-          if(f.properties.level==="1")void showDivisions(f);
-          else {adminChild=f;updateBubbles.current();repaint.current();publishGeography();}
+          selectedProvince=f;updateBubbles.current();repaint.current();publishGeography();
         };
         const selectCity=(city:City)=>{
           if(!selectedCode.current || selectedCode.current!==city.country){
             const country=features.find(f=>countryCode(f)===city.country);if(country)selectCountry(country);return;
           }
-          if(!adminParent){
-            const province=provinceFeatures.find(f=>containsPlace(f,city));
-            if(province){selectDivision(province);return;}
-          }
-          const district=divisions.find(f=>containsPlace(f,city));
-          if(district){selectDivision(district);return;}
-          overview.current.active=false;camera.current.vx=0;camera.current.vy=0;
-          camera.current.targetAltitude=.045;flight.current={lat:city.lat,lng:city.lng};
+          const province=divisions.find(f=>containsPlace(f,city));
+          if(province)selectDivision(province);
         };
         const markerData=()=>!selectedCode.current ? [] : [
-          ...localCities().slice(0,adminParent ? 40 : 24).map(city=>({...city,markerType:"city",target:city})),
+          ...localCities().slice(0,selectedProvince ? 40 : 24).map(city=>({...city,markerType:"city",target:city})),
           ...divisions.map(f=>({id:f.properties.id,name:f.properties.name,...featureCenter(f),markerType:"division",target:f})),
         ];
         const createMarker=(item:any)=>{
@@ -205,7 +196,7 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
           .onPolygonHover((f: any) => {
             if (drag.current.active || flight.current || !pointerOnCanvas) return;
             hovered = f; repaint.current();
-            callbacks.current.onHover(f ? isAdmin(f) ? {name:f.properties.name,kind:"division",events:[],hint:f.properties.level==="1" ? "点击查看市／县级" : "点击放大",...cursor} : { ...countryRegion(f), kind: "country", events: data.current.filter(e => e.country === countryCode(f)), ...cursor } : null);
+            callbacks.current.onHover(f ? isAdmin(f) ? {name:f.properties.name,kind:"division",events:[],hint:"点击放大省／州",...cursor} : { ...countryRegion(f), kind: "country", events: data.current.filter(e => e.country === countryCode(f)), ...cursor } : null);
           })
           .onPolygonClick((f: object, _event: MouseEvent, point: {lat: number; lng: number}) => {
             if (drag.current.moved > 4 || performance.now() - drag.current.ended < 80) return;
@@ -213,12 +204,14 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
           });
         repaint.current = () => globe.polygonCapColor(colors).polygonAltitude(surfaceAltitude).polygonStrokeColor(stroke);
         updateBubbles.current=()=>{closeBubble();keyboardReading=false;bubbleNodes=[];geographyNodes=[];globe.htmlElementsData([...bubbleData(),...markerData()]);globe.labelsData(localCities());};
-        const returnToCountry=()=>{const f=features.find(f=>countryCode(f)===selectedCode.current);if(f)selectCountry(f);};
-        const returnToParent=()=>{if(adminParent){adminChild=null;flyToFeature(adminParent);updateBubbles.current();repaint.current();publishGeography();}};
-        navigation.current={country:returnToCountry,parent:returnToParent,back:()=>{if(adminChild)returnToParent();else if(adminParent)returnToCountry();else callbacks.current.onReset();},choose:id=>{const f=divisions.find(f=>f.properties.id===id);if(f)selectDivision(f);},retry:()=>{void showDivisions(adminParent);}};
+        const returnToCountry=()=>{
+          const f=features.find(f=>countryCode(f)===selectedCode.current);
+          if(f){selectedProvince=null;flyToFeature(f);updateBubbles.current();repaint.current();publishGeography();}
+        };
+        navigation.current={country:returnToCountry,back:()=>{if(selectedProvince)returnToCountry();else callbacks.current.onReset();},choose:id=>{if(!id){returnToCountry();return;}const f=divisions.find(f=>f.properties.id===id);if(f)selectDivision(f);},retry:()=>{void showDivisions();}};
         syncGeography.current=()=>{
           if(selectedCode.current)return;
-          boundaryRequest?.abort();boundaryVersion++;adminParent=null;adminChild=null;divisions=[];provinceFeatures=[];
+          boundaryRequest?.abort();boundaryVersion++;selectedProvince=null;divisions=[];
           refreshGeography();
         };
         focusCountry.current = code => { const f = features.find(f => countryCode(f) === code); if (f) selectCountry(f); };
@@ -425,12 +418,11 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
     {geographyView && <div className="geography-navigation">
       <nav aria-label="地图层级" className="geography-breadcrumbs">
         <button onClick={()=>navigation.current.country()} aria-label={`返回${geographyView.country}全图`}>{geographyView.country}</button>
-        {geographyView.parent && <><ChevronRight size={13}/><button onClick={()=>navigation.current.parent()}>{geographyView.parent.properties.name}</button></>}
-        {geographyView.child && <><ChevronRight size={13}/><span>{geographyView.child.properties.name}</span></>}
+        {geographyView.province && <><ChevronRight size={13}/><span>{geographyView.province.properties.name}</span></>}
         <button className="geography-close" onClick={()=>callbacks.current.onReset()} aria-label="返回全球"><X size={16}/></button>
       </nav>
       <div className="geography-context">
-        {geographyView.status==="loading" ? <span role="status"><LoaderCircle size={12} className="loading-icon"/>加载{geographyView.label}…</span> : geographyView.status==="error" ? <button onClick={()=>navigation.current.retry()}>边界暂未加载 · 重试</button> : geographyView.choices.length ? <NativeSelect className="division-picker" value={geographyView.child?.properties.id || ""} aria-label={geographyView.parent ? "选择市或县" : "选择省或州"} onChange={e=>navigation.current.choose(e.target.value)}><NativeSelectOption value="">{geographyView.label} · 点击地图或选择</NativeSelectOption>{geographyView.choices.map(f=><NativeSelectOption key={f.properties.id} value={f.properties.id}>{f.properties.name}</NativeSelectOption>)}</NativeSelect> : <span role="status">此地区暂无可用的下一级边界</span>}
+        {geographyView.status==="loading" ? <span role="status"><LoaderCircle size={12} className="loading-icon"/>加载{geographyView.label}…</span> : geographyView.status==="error" ? <button onClick={()=>navigation.current.retry()}>边界暂未加载 · 重试</button> : geographyView.choices.length ? <NativeSelect className="division-picker" value={geographyView.province?.properties.id || ""} aria-label="选择省或州" onChange={e=>navigation.current.choose(e.target.value)}><NativeSelectOption value="">{geographyView.label} · 点击地图或选择</NativeSelectOption>{geographyView.choices.map(f=><NativeSelectOption key={f.properties.id} value={f.properties.id}>{f.properties.name}</NativeSelectOption>)}</NativeSelect> : <span role="status">此地区暂无可用的省／州级边界</span>}
       </div>
       <p className="geography-source">现代行政区划 · <a href={geographyView.sourceUrl || "https://www.naturalearthdata.com/"} target="_blank" rel="noreferrer">{geographyView.source || "地图数据"} ↗</a></p>
     </div>}
