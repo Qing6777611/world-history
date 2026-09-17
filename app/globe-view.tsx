@@ -5,6 +5,7 @@ import { LoaderCircle, RotateCcw } from "lucide-react";
 import { type AtlasEvent } from "./demo-data";
 import { countryMessages } from "./notification-events";
 import { createGlobeBubble, type GlobeBubble } from "./globe-bubbles";
+import { createGlobeSky } from "./globe-sky";
 import { atlasCountries, countryCode, countryRegion, countryPalette, countryView, type CountryFeature, type CountryRegion } from "./country-geometry";
 
 export type GlobeCommand = { id: number; action: "in" | "out" | "reset" | "focus" | "country"; lat?: number; lng?: number; code?: string };
@@ -83,9 +84,6 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
         };
         const globe: any = new Globe(element, { animateIn: false, rendererConfig: { antialias: true, alpha: true } })
           .backgroundColor("#020408")
-          // Globe.GL wraps this texture around the scene. The globe and the
-          // surrounding stars share the same camera during drag and inertia.
-          .backgroundImageUrl("/textures/night-sky.png")
           .width(element.clientWidth).height(element.clientHeight)
           .globeMaterial(new THREE.MeshPhongMaterial({ color: "#122d3a", shininess: 9, specular: "#1f4653" }))
           .showAtmosphere(true).atmosphereColor("#658d9b").atmosphereAltitude(0.08)
@@ -119,6 +117,7 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
         callbacks.current.onCountriesReady(features.map(countryRegion).sort((a,b) => a.name.localeCompare(b.name,"zh-CN")));
         api.current = globe;
         globe.renderer().setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        const sky = createGlobeSky(THREE, globe.scene(), globe.camera());
         const controls = globe.controls();
         controls.enableRotate = false; controls.enableZoom = false; controls.enablePan = false;
         controls.enableDamping = false; controls.autoRotate = false;
@@ -227,6 +226,8 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
           c.lng = ((c.lng+180)%360+360)%360-180;
           c.altitude += (c.targetAltitude-c.altitude)*(1-Math.exp(-dt*7));
           globe.pointOfView({ lat: c.lat, lng: c.lng, altitude: c.altitude }, 0);
+          sky.update(now);
+          element.dataset.meteor = sky.active ? "visible" : "quiet";
           if(now-lastLabelLayout>90){layoutBubbles();lastLabelLayout=now;}
           element.dataset.longitude = c.lng.toFixed(3);
           element.dataset.latitude = c.lat.toFixed(3);
@@ -238,6 +239,7 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
         setStatus("ready");
         dispose = () => {
           cancelAnimationFrame(frame); resize.disconnect();
+          sky.dispose();
           canvas.removeEventListener("pointerdown", down); canvas.removeEventListener("pointermove", move);
           canvas.removeEventListener("pointerup", up); canvas.removeEventListener("pointercancel", lost);
           canvas.removeEventListener("pointerleave", leave); canvas.removeEventListener("lostpointercapture", lost); canvas.removeEventListener("wheel", wheel);
