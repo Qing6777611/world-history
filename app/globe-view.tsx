@@ -74,7 +74,7 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
             pin.style.setProperty("--marker-color", event.color);
             pin.setAttribute("aria-label", `${event.location}：${event.title}，查看演示详情`);
             pin.onpointerenter = () => {
-              const rect = pin.getBoundingClientRect(), bounds = element.getBoundingClientRect();
+              const rect = pin.getBoundingClientRect(), bounds = (element.closest(".globe-area") || element).getBoundingClientRect();
               callbacks.current.onHover({ name: event.location, kind: "event", events: [event], x: rect.x-bounds.x, y: rect.y-bounds.y });
             };
             pin.onpointerleave = () => callbacks.current.onHover(null);
@@ -116,7 +116,7 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
           callbacks.current.onHover(null);
         };
         const move = (event: PointerEvent) => {
-          const rect = element.getBoundingClientRect(); cursor = { x: event.clientX-rect.left, y: event.clientY-rect.top };
+          const rect = (element.closest(".globe-area") || element).getBoundingClientRect(); cursor = { x: event.clientX-rect.left, y: event.clientY-rect.top };
           if (!drag.current.active || event.pointerId !== drag.current.pointer) return;
           const d = drag.current, c = camera.current;
           const now = performance.now(), dt = Math.max(8, now-d.last)/1000;
