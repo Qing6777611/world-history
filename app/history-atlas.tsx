@@ -8,6 +8,8 @@
 import { flushSync } from "react-dom";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownRight, ArrowLeft, ArrowRight, CalendarDays, ChevronLeft, ChevronRight, Compass, Globe2, Hand, HelpCircle, MapPin, Minus, Pause, Play, Plus, RotateCcw, Scan, Sparkles, X } from "lucide-react";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import type { CountryRegion } from "./country-geometry";
 import { Slider } from "@/components/ui/slider";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -44,6 +46,10 @@ export default function HistoryAtlas() {
   const [speed, setSpeed] = useState(1);
   const [spinning, setSpinning] = useState(true);
   const [selected, setSelected] = useState<{ event: AtlasEvent; time: number } | null>(null);
+  const [region, setRegion] = useState<CountryRegion | null>(null);
+  const [countries, setCountries] = useState<CountryRegion[]>([]);
+  const [regionSpinning, setRegionSpinning] = useState(false);
+  const effectiveSpinning = region ? regionSpinning : spinning;
   const [hover, setHover] = useState<HoverInfo>(null);
   const [command, setCommand] = useState<GlobeCommand | null>(null);
   const [help, setHelp] = useState(false);
@@ -59,8 +65,11 @@ export default function HistoryAtlas() {
   const periodIndex = PERIODS.indexOf(period);
   const allEvents = useMemo(() => eventsAt(time), [parts.year]);
   const events = useMemo(() => category === "all" ? allEvents : allEvents.filter(e => e.category === category), [allEvents, category]);
+  const visibleEvents = region ? events.filter(e => e.country === region.code) : events;
+  const selectRegion = useCallback((next: CountryRegion) => { setRegion(next); setRegionSpinning(false); setHover(null); }, []);
   const changeTime = useCallback((t: number) => { setTime(clampTime(Math.round(t/DAY)*DAY)); setHover(null); }, []);
   const sendCommand = useCallback((action: GlobeCommand["action"], lat?: number, lng?: number) => setCommand({ id: performance.now(), action, lat, lng }), []);
+  const returnToWorld = useCallback(() => { setRegion(null); setHover(null); sendCommand("reset"); }, [sendCommand]);
   const selectEvent = useCallback((event: AtlasEvent) => {
     setSelected({ event, time: timeRef.current }); setPlaying(false); setHover(null); sendCommand("focus", event.lat, event.lng);
   }, [sendCommand]);
@@ -145,18 +154,23 @@ export default function HistoryAtlas() {
 
       <div className="globe-area" ref={globeArea}>
         <div className="globe-orbit" aria-hidden="true"><span>N</span><i/><span>S</span></div>
-        <GlobeView events={events} spinning={spinning} command={command} onSelect={selectEvent} onHover={setHover}/>
-        {hover && <div className="map-tooltip" role="status" style={{left: Math.min(Math.max(16, hover.x+18), (globeArea.current?.clientWidth || 700)-256), top: Math.max(16, Math.min(hover.y+16, (globeArea.current?.clientHeight || 600)-156))}}><span className="tooltip-overline">{hover.events.length ? "此刻的演示场景" : "地区预览"}</span><strong>{hover.name}</strong>{hover.events.length ? hover.events.slice(0,2).map(e => <p key={e.id}><span className="key-dot" style={{background:e.color}}/>{e.title}</p>) : <p className="muted">该地区暂无演示事件</p>}{hover.events.length>0 && <small>点击地点，固定详情 <ArrowDownRight size={12}/></small>}</div>}
-        <div className="globe-bottom"><span className="interaction-hint"><Hand size={15}/>拖动旋转<span>·</span>滚轮缩放<span>·</span>悬停探索</span><div className="globe-tools"><button className="icon-button" aria-label="缩小地球" title="缩小地球" onClick={() => sendCommand("out")}><Minus size={17}/></button><button className="icon-button" aria-label="放大地球" title="放大地球" onClick={() => sendCommand("in")}><Plus size={17}/></button><span className="tool-divider"/><button className="icon-button" aria-label="重置地球视角" title="重置视角" onClick={() => sendCommand("reset")}><Scan size={17}/></button><button className={`icon-button ${spinning ? "is-on" : ""}`} aria-label={spinning ? "暂停地球自转" : "开启地球自转"} aria-pressed={spinning} title={spinning ? "暂停自转" : "开启自转"} onClick={() => setSpinning(v => !v)}>{spinning ? <Pause size={16}/> : <Play size={16}/>}</button></div></div>
+        <div className="region-navigation">
+          <div className="region-picker"><MapPin size={14}/><NativeSelect aria-label="选择国家或地区" value={region?.code || ""} disabled={!countries.length} onChange={e => { if (!e.target.value) returnToWorld(); else setCommand({id:performance.now(),action:"country",code:e.target.value}); }}><NativeSelectOption value="">全球视图 · 选择地区</NativeSelectOption>{countries.map(c => <NativeSelectOption key={c.code} value={c.code}>{c.name}</NativeSelectOption>)}</NativeSelect></div>
+          {region && <button className="back-to-world" onClick={returnToWorld}><ArrowLeft size={14}/>返回全球</button>}
+        </div>
+        <GlobeView events={events} spinning={effectiveSpinning} command={command} selectedCountry={region?.code || null} onRegionSelect={selectRegion} onCountriesReady={setCountries} onSelect={selectEvent} onHover={setHover}/>
+        {!region && <div className="country-color-key" aria-hidden="true"><span><i/><i/><i/><i/></span>国家分区 · 点击放大</div>}
+        {hover && <div className="map-tooltip" role="status" style={{left: Math.min(Math.max(16, hover.x+18), (globeArea.current?.clientWidth || 700)-256), top: Math.max(16, Math.min(hover.y+16, (globeArea.current?.clientHeight || 600)-156))}}><span className="tooltip-overline">{hover.events.length ? "此刻的演示场景" : "地区预览"}</span><strong>{hover.name}</strong>{hover.events.length ? hover.events.slice(0,2).map(e => <p key={e.id}><span className="key-dot" style={{background:e.color}}/>{e.title}</p>) : <p className="muted">该地区暂无演示事件</p>}<small>{hover.kind === "country" ? "点击地区，放大探索" : "点击地点，查看详情"}<ArrowDownRight size={12}/></small></div>}
+        <div className="globe-bottom"><span className="interaction-hint"><Hand size={15}/>拖动旋转<span>·</span>滚轮缩放<span>·</span>点击地区放大</span><div className="globe-tools"><button className="icon-button" aria-label="缩小地球" title="缩小地球" onClick={() => sendCommand("out")}><Minus size={17}/></button><button className="icon-button" aria-label="放大地球" title="放大地球" onClick={() => sendCommand("in")}><Plus size={17}/></button><span className="tool-divider"/><button className="icon-button" aria-label="重置地球视角" title="重置视角" onClick={returnToWorld}><Scan size={17}/></button><button className={`icon-button ${effectiveSpinning ? "is-on" : ""}`} aria-label={effectiveSpinning ? "暂停地球自转" : "开启地球自转"} aria-pressed={effectiveSpinning} title={effectiveSpinning ? "暂停自转" : "开启自转"} onClick={() => region ? setRegionSpinning(v => !v) : setSpinning(v => !v)}>{effectiveSpinning ? <Pause size={16}/> : <Play size={16}/>}</button></div></div>
       </div>
 
       <aside className="events-panel" aria-label="当前时期事件列表">
-        <div className="events-header"><div><p className="eyebrow">MEANWHILE, ON EARTH</p><h2>此刻的世界</h2></div><span className="event-count">{String(events.length).padStart(2,"0")}</span></div>
-        <p className="events-subtitle">{category === "all" ? "不同地方，同一段时间" : `${category}主题 · 当前时期`}<span>演示</span></p>
-        <div className="event-list">{events.map((event, index) => <button key={event.id} className="event-row" onClick={() => selectEvent(event)} style={{"--event-color": event.color} as React.CSSProperties}>
+        <div className="events-header"><div><p className="eyebrow">{region ? "A CLOSER LOOK" : "MEANWHILE, ON EARTH"}</p><h2>{region?.name || "此刻的世界"}</h2></div><span className="event-count">{String(visibleEvents.length).padStart(2,"0")}</span></div>
+        <p className="events-subtitle">{region ? `${yearLabel(parts.year)} · ${category === "all" ? "本地场景" : category+"主题"}` : category === "all" ? "不同地方，同一段时间" : `${category}主题 · 当前时期`}<span>演示</span></p>
+        <div className="event-list">{region && <div className="region-context"><span><MapPin size={13}/>地区已定位</span><p>拖动时间轴，查看这里在不同时期的故事。</p></div>}{visibleEvents.length === 0 && <div className="region-empty"><Globe2 size={28} strokeWidth={1}/><h3>这里的故事，待补充</h3><p>{category === "all" ? "该地区暂未收录演示事件。你仍可以旋转地图，或切换时间继续探索。" : "当前主题下暂无演示事件，可以切换为全部主题。"}</p>{category !== "all" ? <button className="text-button" onClick={() => setCategory("all")}>查看全部主题<ArrowRight size={14}/></button> : <button className="text-button" onClick={returnToWorld}>探索其他地区<ArrowRight size={14}/></button>}</div>}{visibleEvents.map((event, index) => <button key={event.id} className="event-row" onClick={() => selectEvent(event)} style={{"--event-color": event.color} as React.CSSProperties}>
           <span className="event-row-meta"><span><i/>{event.region} <span className="location-separator">/</span> {event.location}</span><ArrowDownRight size={15}/></span><span className="event-row-title">{event.title}</span><span className="event-row-bottom"><span>{event.category}</span><span>场景 {String(index+1).padStart(2,"0")}</span></span>
         </button>)}</div>
-        <div className="events-footer"><Compass size={16}/><span>点击事件，转向它发生的地方</span></div>
+        <div className="events-footer"><Compass size={16}/><span>{region ? "点击其他国家，可继续切换地区" : "点击国家，走近它的故事"}</span></div>
       </aside>
     </section>
 
@@ -175,7 +189,7 @@ export default function HistoryAtlas() {
     <Sheet open={!!selected} onOpenChange={open => {if (!open) setSelected(null);}}>
       <SheetContent className="event-sheet" showCloseButton={false}>
         <div className="sheet-top"><span className="eyebrow">A MOMENT IN THE WORLD</span><SheetClose className="icon-button" aria-label="关闭事件详情"><X size={20}/></SheetClose></div>
-        {selected && <><SheetHeader><span className="sheet-category" style={{color:selected.event.color}}>{selected.event.category} / {selected.event.region}</span><SheetTitle>{selected.event.title}</SheetTitle><SheetDescription><MapPin size={15}/>{selected.event.location} · {yearLabel(dateParts(selected.time).year)}</SheetDescription></SheetHeader><div className="sheet-content"><div className="demo-callout"><Sparkles size={17}/><div><strong>交互演示场景</strong><p>此内容用于预览产品体验，不作为历史事实。</p></div></div><h3>这一刻，在这里</h3><p>{selected.event.summary}</p><dl><div><dt>演示时间范围</dt><dd>{yearLabel(selected.event.start)} — {yearLabel(selected.event.end)}</dd></div><div><dt>地理位置</dt><dd>{Math.abs(selected.event.lat).toFixed(2)}° {selected.event.lat>=0?"N":"S"} · {Math.abs(selected.event.lng).toFixed(2)}° {selected.event.lng>=0?"E":"W"}</dd></div><div><dt>资料来源</dt><dd>演示内容 · 历史资料待补充</dd></div></dl><button className="primary-button" onClick={() => {sendCommand("focus",selected.event.lat,selected.event.lng);setSelected(null);}}><Compass size={17}/>在地球上查看<ArrowRight size={17}/></button></div><div className="sheet-footnote">详情已固定。地球继续缓慢转动，阅读不受影响。</div></>}
+        {selected && <><SheetHeader><span className="sheet-category" style={{color:selected.event.color}}>{selected.event.category} / {selected.event.region}</span><SheetTitle>{selected.event.title}</SheetTitle><SheetDescription><MapPin size={15}/>{selected.event.location} · {yearLabel(dateParts(selected.time).year)}</SheetDescription></SheetHeader><div className="sheet-content"><div className="demo-callout"><Sparkles size={17}/><div><strong>交互演示场景</strong><p>此内容用于预览产品体验，不作为历史事实。</p></div></div><h3>这一刻，在这里</h3><p>{selected.event.summary}</p><dl><div><dt>演示时间范围</dt><dd>{yearLabel(selected.event.start)} — {yearLabel(selected.event.end)}</dd></div><div><dt>地理位置</dt><dd>{Math.abs(selected.event.lat).toFixed(2)}° {selected.event.lat>=0?"N":"S"} · {Math.abs(selected.event.lng).toFixed(2)}° {selected.event.lng>=0?"E":"W"}</dd></div><div><dt>资料来源</dt><dd>演示内容 · 历史资料待补充</dd></div></dl><button className="primary-button" onClick={() => {sendCommand("focus",selected.event.lat,selected.event.lng);setSelected(null);}}><Compass size={17}/>在地球上查看<ArrowRight size={17}/></button></div><div className="sheet-footnote">详情已固定。关闭后可继续探索地图和时间轴。</div></>}
       </SheetContent>
     </Sheet>
 
@@ -185,6 +199,6 @@ export default function HistoryAtlas() {
       if (!Number.isInteger(year) || year === 0 || year < -500 || year > 2025 || checked.year !== year || checked.month !== month || checked.day !== day) {setDateError("请输入范围内的有效日期，例如 1450 年 6 月 15 日。");return;}
       setPlaying(false);changeTime(t);setRange(rangeAt(t,scale));setDateOpen(false);
     }}><div className="date-fields"><label>年份<input name="year" type="number" required min="-500" max="2025" defaultValue={parts.year} aria-describedby={dateError ? "date-error" : undefined}/></label><label>月<input name="month" type="number" required min="1" max="12" defaultValue={parts.month}/></label><label>日<input name="day" type="number" required min="1" max="31" defaultValue={parts.day}/></label></div>{dateError && <p id="date-error" className="form-error" role="alert">{dateError}</p>}<button className="primary-button" type="submit">前往这个时刻<ArrowRight size={17}/></button></form></DialogContent></Dialog>
-    <Dialog open={help} onOpenChange={setHelp}><DialogContent className="atlas-dialog help-dialog"><DialogHeader><DialogTitle>世界，尽在指间</DialogTitle><DialogDescription>从一次轻轻的拨动开始。</DialogDescription></DialogHeader><div className="help-rows"><div><Hand/><p><strong>拨动地球</strong><span>按住拖动改变方向与速度，松手后惯性旋转。悬停不会打断自转。</span></p></div><div><Scan/><p><strong>靠近一个地方</strong><span>滚轮或加减按钮缩放；悬停区域预览事件，点击固定详情。</span></p></div><div><CalendarDays/><p><strong>穿梭不同时间</strong><span>拖动时间轴，切换尺度，或直接输入日期。播放按钮让时间自动前进。</span></p></div></div><p className="help-keyboard">键盘：聚焦地球后用方向键旋转、加减键缩放；聚焦时间轴后用方向键逐日调整。</p><p className="data-disclosure">当前为交互原型，事件均为演示场景。地图采用 Natural Earth 现代地理轮廓，仅作定位参照。历史事件、资料来源与历史疆域将在后续补充。</p></DialogContent></Dialog>
+    <Dialog open={help} onOpenChange={setHelp}><DialogContent className="atlas-dialog help-dialog"><DialogHeader><DialogTitle>世界，尽在指间</DialogTitle><DialogDescription>从一次轻轻的拨动开始。</DialogDescription></DialogHeader><div className="help-rows"><div><Hand/><p><strong>拨动地球</strong><span>按住拖动改变方向与速度，松手后惯性旋转。悬停不会打断自转。</span></p></div><div><Scan/><p><strong>靠近一个地方</strong><span>点击国家，平滑放大并显示当地事件；返回全球恢复原来的旋转状态。也可用上方选择器定位地区。</span></p></div><div><CalendarDays/><p><strong>穿梭不同时间</strong><span>拖动时间轴，切换尺度，或直接输入日期。播放按钮让时间自动前进。</span></p></div></div><p className="help-keyboard">键盘：聚焦地球后用方向键旋转、加减键缩放；聚焦时间轴后用方向键逐日调整。</p><p className="data-disclosure">当前为交互原型，事件均为演示场景。地图采用 Natural Earth 现代地理轮廓，仅作定位参照。分区颜色仅用于区分国家。历史事件、资料来源与历史疆域将在后续补充。</p></DialogContent></Dialog>
   </main>;
 }
