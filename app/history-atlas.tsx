@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import GlobeView, { type GlobeCommand, type HoverInfo } from "./globe-view";
+import NotificationStack from "./notification-stack";
+import { notificationEvents } from "./notification-events";
 import type { CountryRegion } from "./country-geometry";
 import type { DayHistory } from "./on-this-day";
 import { DAY, getMaxTime, MIN_TIME, clampTime, dateParts, eventsAt, timestamp, yearLabel, localToday, hasCoordinates, type AtlasEvent } from "./demo-data";
@@ -27,7 +29,8 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
   const [regionSpinning, setRegionSpinning] = useState(false);
   const [countries, setCountries] = useState<CountryRegion[]>([]);
   const [selected, setSelected] = useState<{ event: AtlasEvent; time: number } | null>(null);
-  const [eventList, setEventList] = useState<{title:string; events:AtlasEvent[]} | null>(null);
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const detailTrigger = useRef<HTMLElement | null>(null);
   const [history, setHistory] = useState<DayHistory | null>(null);
   const [historyStatus, setHistoryStatus] = useState<"loading" | "ready" | "error">("loading");
   const [historyAttempt, setHistoryAttempt] = useState(0);
@@ -48,19 +51,20 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
   const events = useMemo(() => isToday ? todaysEvents : eventsAt(time, maxYear), [isToday, todaysEvents, time, maxYear]);
   const eventsRef = useRef(events); eventsRef.current=events;
   const statusRef = useRef(historyStatus); statusRef.current=historyStatus;
-  const regionEvents = region ? events.filter(e => e.country === region.code) : [];
-  const changeTime = useCallback((t: number) => { setTime(clampTime(Math.round(t/DAY)*DAY, maxYear)); setHover(null); setSelected(null); setEventList(null); }, [maxYear]);
+  const messages = useMemo(()=>notificationEvents(region ? events.filter(e=>e.country===region.code) : events),[events,region]);
+  const highlightedEvent=selected?.event || messages.find(event=>event.id===highlightedId) || messages[0] || null;
+  const changeTime = useCallback((t: number) => { setTime(clampTime(Math.round(t/DAY)*DAY, maxYear)); setHover(null); setHighlightedId(null); setSelected(null);  }, [maxYear]);
   const sendCommand = useCallback((action: GlobeCommand["action"], lat?: number, lng?: number) => setCommand({ id: performance.now(), action, lat, lng }), []);
-  const selectRegion = useCallback((next: CountryRegion) => { setRegion(next); setRegionSpinning(false); setHover(null); }, []);
-  const returnToWorld = useCallback(() => { setRegion(null); setHover(null); sendCommand("reset"); }, [sendCommand]);
-  const selectEvent = useCallback((event: AtlasEvent) => { setSelected({ event, time: timeRef.current }); setHover(null); if(hasCoordinates(event)) sendCommand("focus", event.lat, event.lng); }, [sendCommand]);
+  const selectRegion = useCallback((next: CountryRegion) => { setRegion(next); setRegionSpinning(false); setHover(null); setHighlightedId(null); }, []);
+  const returnToWorld = useCallback(() => { setRegion(null); setHover(null); setHighlightedId(null); sendCommand("reset"); }, [sendCommand]);
+  const selectEvent = useCallback((event: AtlasEvent) => { detailTrigger.current=document.activeElement instanceof HTMLElement ? document.activeElement : null; setSelected({ event, time: timeRef.current }); setHover(null); if(hasCoordinates(event)) sendCommand("focus", event.lat, event.lng); }, [sendCommand]);
 
   useEffect(() => {
     // Hydrate from the server, then follow the visitor's calendar (including midnight).
     const refresh = () => {
       const next=localToday(), previous=todayRef.current;
       todayRef.current=next; setToday(next); setMaxYear(dateParts(next).year);
-      if(next!==previous){setEventList(null);setSelected(null);setHover(null);}
+      if(next!==previous){setSelected(null);setHover(null);}
       setTime(current=>current===previous ? next : current);
     };
     refresh();
@@ -91,24 +95,19 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
       .catch(()=>{if(!controller.signal.aborted)setHistoryStatus("error");});
     return ()=>{controller.abort();clearTimeout(retryTimer);};
   }, [todayParts.month,todayParts.day,historyAttempt]);
-  const goToday = () => {const next=localToday(); todayRef.current=next;setToday(next);setMaxYear(dateParts(next).year);setTime(next);setSelected(null);setEventList(null);returnToWorld();setDateOpen(false);};
-  const openEvents = useCallback((items:AtlasEvent[]) => {
-    setHover(null);
-    if(items.length===1) {setEventList(null);selectEvent(items[0]);}
-    else {setSelected(null);setEventList({title:"这一带的往事",events:items});}
-  }, [selectEvent]);
-  const closeDetails = () => {setSelected(null);setEventList(null);if(!region)sendCommand("reset");};
+  const goToday = () => {const next=localToday(); todayRef.current=next;setToday(next);setMaxYear(dateParts(next).year);setTime(next);setSelected(null);returnToWorld();setDateOpen(false);};
+  const closeDetails = () => {setSelected(null);if(!region)sendCommand("reset");};
   useEffect(() => {
     const thumb = document.querySelector('.time-slider [role="slider"]');
     thumb?.setAttribute("aria-label", "历史日期");
     thumb?.setAttribute("aria-valuetext", `${yearLabel(parts.year)} ${parts.month}月${parts.day}日`);
   }, [time, parts.year, parts.month, parts.day]);
   useEffect(() => {
-    if (!region || selected || eventList || dateOpen) return;
+    if (!region || selected || dateOpen) return;
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape") returnToWorld(); };
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
-  }, [region, selected, eventList, dateOpen, returnToWorld]);
+  }, [region, selected, dateOpen, returnToWorld]);
   useEffect(() => {
     const context = (document as unknown as { modelContext?: { registerTool: (tool: unknown, options: { signal: AbortSignal }) => void | Promise<void> } }).modelContext;
     if (!context?.registerTool) return;
@@ -120,30 +119,29 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
   }, [changeTime, maxYear]);
 
   const percent = (time-MIN_TIME)/(maxTime-MIN_TIME)*100;
-  return <main className="atlas-app">
+  return <main className="atlas-app has-notifications">
     <h1 className="sr-only">纪元 · 世界历史地图</h1>
     <section className="globe-area" ref={globeArea} aria-label="世界历史探索">
       <div className="keyboard-region-picker"><NativeSelect aria-label="选择国家或地区" disabled={!countries.length} value={region?.code || ""} onChange={e => e.target.value ? setCommand({id:performance.now(),action:"country",code:e.target.value}) : returnToWorld()}><NativeSelectOption value="">全球视图</NativeSelectOption>{countries.map(c => <NativeSelectOption key={c.code} value={c.code}>{c.name}</NativeSelectOption>)}</NativeSelect></div>
-      <GlobeView events={events} spinning={!selected && !eventList && (region ? regionSpinning : spinning)} command={command} selectedCountry={region?.code || null} onRegionSelect={selectRegion} onCountriesReady={setCountries} onSelect={openEvents} onHover={setHover} onReset={returnToWorld} onToggleSpin={() => region ? setRegionSpinning(v => !v) : setSpinning(v => !v)}/>
-      {hover && !selected && !eventList && <div className="map-tooltip" role="status" style={{left:Math.max(12,Math.min(hover.x+18,(globeArea.current?.clientWidth || 700)-244)),top:Math.max(12,Math.min(hover.y+18,(globeArea.current?.clientHeight || 600)-150))}}><strong>{hover.name}</strong>{hover.events.length ? hover.events.slice(0,2).map(e=><p key={e.id}><span>{e.historical ? `${Math.abs(e.historical.year)}${e.historical.year<0 ? " BCE" : "年"}` : "演示"}</span>{e.title}</p>) : <p className="muted">{isToday ? historyStatus==="loading" ? "正在查阅历史…" : historyStatus==="error" ? "历史资料暂时无法加载" : "暂无已定位的当日事件" : "暂无演示事件"}</p>}<small>{hover.kind === "country" ? "点击放大" : "点击查看详情"}</small></div>}
+      <GlobeView events={events} highlightedEvent={highlightedEvent} spinning={!selected && (region ? regionSpinning : spinning)} command={command} selectedCountry={region?.code || null} onRegionSelect={selectRegion} onCountriesReady={setCountries} onSelect={items=>{if(items[0])selectEvent(items[0]);}} onHover={setHover} onReset={returnToWorld} onToggleSpin={() => region ? setRegionSpinning(v => !v) : setSpinning(v => !v)}/>
+      <NotificationStack key={`${time}-${region?.code || "world"}`} events={messages} region={region?.name || null} dateLabel={yearLabel(parts.year)} status={isToday ? historyStatus : "ready"} onSelect={selectEvent} onHighlight={setHighlightedId} onReset={returnToWorld} onRetry={()=>setHistoryAttempt(n=>n+1)}/>
+      {hover && !selected && <div className="map-tooltip" role="status" style={{left:Math.max(12,Math.min(hover.x+18,(globeArea.current?.clientWidth || 700)-244)),top:Math.max(12,Math.min(hover.y+18,(globeArea.current?.clientHeight || 600)-150))}}><strong>{hover.name}</strong>{hover.events.length ? hover.events.slice(0,2).map(e=><p key={e.id}><span>{e.historical ? `${Math.abs(e.historical.year)}${e.historical.year<0 ? " BCE" : "年"}` : "演示"}</span>{e.title}</p>) : <p className="muted">{isToday ? historyStatus==="loading" ? "正在查阅历史…" : historyStatus==="error" ? "历史资料暂时无法加载" : "暂无已定位的当日事件" : "暂无演示事件"}</p>}<small>{hover.kind === "country" ? "点击放大" : "点击查看详情"}</small></div>}
     </section>
 
-    {region && <aside className="region-card" aria-label={`${region.name}地区详情`}><div className="region-card-header"><h2>{region.name}</h2><button className="icon-button" onClick={returnToWorld} aria-label="返回全球" title="返回全球"><X size={18}/></button></div><p className="region-date">{isToday ? `${parts.month}月${parts.day}日 · 历史上的今天` : `${yearLabel(parts.year)} · 演示事件`}</p><div className="region-events">{regionEvents.length ? regionEvents.map(event=><button key={event.id} className="region-event" onClick={()=>selectEvent(event)}><span>{event.title}<small>{event.historical ? `${yearLabel(event.historical.year)} · ` : ""}{event.location}</small></span><ArrowRight size={16}/></button>) : <p className="empty-region">{isToday ? "暂无已定位的当日事件" : "暂无演示事件"}</p>}</div><p className="region-note">{isToday ? "按现代地理轮廓归组 · 标记为关联地点" : "现代地理轮廓 · 历史资料待补充"}</p></aside>}
-
     <section className="timeline" aria-label="历史时间轴">
-      <div className="day-context" aria-live="polite">{isToday ? historyStatus==="loading" ? <span>正在查阅历史上的今天…</span> : historyStatus==="error" ? <button onClick={()=>setHistoryAttempt(n=>n+1)}>资料暂未加载 · 点击重试</button> : <button onClick={()=>{setSelected(null);setEventList({title:"历史上的今天",events:todaysEvents});}}>{todaysEvents.length ? `历史上的今天 · ${todaysEvents.length} 件往事` : "历史上的今天 · 暂无收录"}</button> : <button onClick={goToday}>回到今天</button>}</div>
+      <div className="day-context">{isToday ? <span>今天</span> : <button onClick={goToday}>回到今天</button>}</div>
       <button className="current-year" onClick={()=>{setDateOpen(true);setDateError("");}} aria-label={`当前${yearLabel(parts.year)} ${parts.month}月${parts.day}日，点击修改日期`} title="点击修改日期">{parts.year < 0 && <span>公元前 </span>}{Math.abs(parts.year)}<span> 年 </span>{String(parts.month).padStart(2,"0")}<span> 月 </span>{String(parts.day).padStart(2,"0")}<span> 日</span></button>
       <div className="timeline-line"><Slider className="time-slider" min={MIN_TIME} max={maxTime} step={DAY} value={[time]} aria-label="历史日期" onValueChange={v=>changeTime(v[0])}/><div className="timeline-ticks" aria-hidden="true">{[-500,1,500,1000,1500,maxYear].map(year=><i key={year} style={{left:`${(timestamp(year)-MIN_TIME)/(maxTime-MIN_TIME)*100}%`}}/>)}</div></div>
       <div className="timeline-ends" aria-hidden="true"><span>公元前 500 年</span><span>{maxYear} 年</span></div>
       <span className="sr-only">当前进度 {Math.round(percent)}%。方向键逐日调整，点击日期可输入准确日期。</span>
     </section>
 
-    <Sheet open={!!selected || !!eventList} onOpenChange={open=>{if(!open)closeDetails();}}><SheetContent className="event-sheet" showCloseButton={false}>
-      <div className="sheet-top">{selected && eventList ? <button className="text-button" onClick={()=>setSelected(null)}>← 返回列表</button> : <span>{selected?.event.historical || eventList ? "历史上的今天" : "演示事件"}</span>}<SheetClose className="icon-button" aria-label="关闭事件详情"><X size={20}/></SheetClose></div>
-      {selected ? <><SheetHeader><SheetTitle>{selected.event.title}</SheetTitle><SheetDescription>{selected.event.historical ? `${yearLabel(selected.event.historical.year)} ${selected.event.historical.month}月${selected.event.historical.day}日` : `${selected.event.location} · ${yearLabel(dateParts(selected.time).year)}`}</SheetDescription></SheetHeader><div className="sheet-content">
+    <Sheet open={!!selected} onOpenChange={open=>{if(!open)closeDetails();}}><SheetContent className="event-sheet" showCloseButton={false} onCloseAutoFocus={event=>{event.preventDefault();const target=detailTrigger.current?.isConnected ? detailTrigger.current : document.querySelector<HTMLElement>(".current-year");target?.focus({preventScroll:true});}}>
+      <div className="sheet-top"><span>{selected?.event.historical ? "历史上的今天" : "演示事件"}</span><SheetClose className="icon-button" aria-label="关闭事件详情"><X size={20}/></SheetClose></div>
+      {selected && <><SheetHeader><SheetTitle>{selected.event.title}</SheetTitle><SheetDescription>{selected.event.historical ? `${yearLabel(selected.event.historical.year)} ${selected.event.historical.month}月${selected.event.historical.day}日` : `${selected.event.location} · ${yearLabel(dateParts(selected.time).year)}`}</SheetDescription></SheetHeader><div className="sheet-content">
         {selected.event.summary && <p>{selected.event.summary}</p>}
         {selected.event.historical ? <><p className="event-place">{hasCoordinates(selected.event) ? `关联地点：${selected.event.location}` : "此条事件尚无可靠地点，暂未标在地图上。"}</p><p className="source-note">{selected.event.historical.locationUrl && <>地图采用关联地点的词条坐标，不代表事件范围。<br/><a href={selected.event.historical.locationUrl} target="_blank" rel="noreferrer">查看地点资料 ↗</a><br/></>}<a href={selected.event.historical.sourceUrl} target="_blank" rel="noreferrer">{selected.event.historical.sourceUrl.includes("wikipedia.org") ? "来源：维基百科" : "来源：美国国务院历史档案"} ↗</a>{selected.event.historical.sourceUrl.includes("wikipedia.org") && <><br/><a href="https://creativecommons.org/licenses/by-sa/4.0/deed.zh-hans" target="_blank" rel="noreferrer">CC BY-SA 4.0</a> · 来源文字整理</>}</p></> : <p className="demo-note">当前内容用于交互演示，历史资料后续补充。</p>}
-      </div></> : eventList && <><SheetHeader><SheetTitle>{eventList.title}</SheetTitle><SheetDescription>{todayParts.month}月{todayParts.day}日 · 跨越不同年份的往事</SheetDescription></SheetHeader><div className="day-event-list">{eventList.events.length ? eventList.events.map(event=><button className="region-event" key={event.id} onClick={()=>selectEvent(event)}><span><small>{yearLabel(event.historical?.year || event.start)}{hasCoordinates(event) ? ` · ${event.location}` : " · 地点待考证"}</small>{event.title}</span><ArrowRight size={16}/></button>) : <p className="empty-region">这个日期暂未收录事件。</p>}<p className="region-note">资料来自维基百科，供历史探索参考。地图仅显示可定位的关联地点。{history?.stale ? " 当前展示最近缓存的资料。" : ""}</p></div></>}
+      </div></>}
     </SheetContent></Sheet>
     <Dialog open={dateOpen} onOpenChange={setDateOpen}><DialogContent className="atlas-dialog"><DialogHeader><DialogTitle>选择日期</DialogTitle><DialogDescription>负数表示公元前，没有公元 0 年。</DialogDescription></DialogHeader><form onSubmit={event=>{
       event.preventDefault(); const form=new FormData(event.currentTarget), year=Number(form.get("year")), month=Number(form.get("month")), day=Number(form.get("day"));

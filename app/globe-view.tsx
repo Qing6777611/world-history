@@ -2,20 +2,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, RotateCcw } from "lucide-react";
-import type { AtlasEvent } from "./demo-data";
-import { eventMarkers, type EventMarker } from "./event-markers";
+import { hasCoordinates, type AtlasEvent } from "./demo-data";
 import { atlasCountries, countryCode, countryRegion, countryPalette, countryView, type CountryFeature, type CountryRegion } from "./country-geometry";
 
 export type GlobeCommand = { id: number; action: "in" | "out" | "reset" | "focus" | "country"; lat?: number; lng?: number; code?: string };
 export type HoverInfo = { name: string; kind: "country" | "event"; events: AtlasEvent[]; x: number; y: number } | null;
-type Props = { events: AtlasEvent[]; spinning: boolean; command: GlobeCommand | null; onSelect: (events: AtlasEvent[]) => void; onHover: (info: HoverInfo) => void; selectedCountry: string | null; onRegionSelect: (region: CountryRegion) => void; onCountriesReady: (regions: CountryRegion[]) => void; onReset: () => void; onToggleSpin: () => void };
+type Props = { events: AtlasEvent[]; highlightedEvent: AtlasEvent | null; spinning: boolean; command: GlobeCommand | null; onSelect: (events: AtlasEvent[]) => void; onHover: (info: HoverInfo) => void; selectedCountry: string | null; onRegionSelect: (region: CountryRegion) => void; onCountriesReady: (regions: CountryRegion[]) => void; onReset: () => void; onToggleSpin: () => void };
 
 // Rotation uses one camera state: direct pointer input wins over idle spin.
 // Release velocity decays exponentially into a slow spin in the last direction.
-export default function GlobeView({ events, spinning, command, onSelect, onHover, selectedCountry, onRegionSelect, onCountriesReady, onReset, onToggleSpin }: Props) {
+export default function GlobeView({ events, highlightedEvent, spinning, command, onSelect, onHover, selectedCountry, onRegionSelect, onCountriesReady, onReset, onToggleSpin }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const api = useRef<any>(null);
   const data = useRef(events);
+  const highlighted = useRef(highlightedEvent); highlighted.current=highlightedEvent;
+  const markerData = () => highlighted.current && hasCoordinates(highlighted.current) ? [highlighted.current] : [];
   const reducedMotion = useRef(false);
   const callbacks = useRef({ onSelect, onHover, onRegionSelect, onCountriesReady, onReset, onToggleSpin });
   const selectedCode = useRef(selectedCountry);
@@ -70,27 +71,18 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
           .polygonsData(features)
           .polygonAltitude(surfaceAltitude).polygonCapColor(colors).polygonSideColor(() => "#203c43")
           .polygonStrokeColor(stroke).polygonsTransitionDuration(reducedMotion.current ? 0 : 230)
-          .htmlElementsData(eventMarkers(data.current, selectedCode.current)).htmlLat("lat").htmlLng("lng").htmlAltitude(0.035)
+          .htmlElementsData(markerData()).htmlLat("lat").htmlLng("lng").htmlAltitude(0.035)
           .htmlElement((item: any) => {
-            const marker = item as EventMarker;
+            const event = item as AtlasEvent;
             const pin = document.createElement("button");
-            pin.type = "button"; pin.className = `globe-pin${marker.compact ? " globe-pin-compact" : ""}`;
-            pin.textContent = marker.compact ? marker.events.length>1 ? String(marker.events.length) : "" : `${marker.name}${marker.events.length>1 ? ` · ${marker.events.length}` : ""}`;
-            pin.style.setProperty("--marker-color", marker.color);
-            const label=marker.events.length>1 ? `${marker.name}附近：${marker.events.length}件往事` : `${marker.name}：${marker.events[0].title}`;
-            pin.setAttribute("aria-label", `${label}，查看详情`);
-            const showHover = () => {
-              const rect = pin.getBoundingClientRect(), bounds = (element.closest(".globe-area") || element).getBoundingClientRect();
-              callbacks.current.onHover({ name: marker.events.length>1 ? `${marker.name}附近 · ${marker.events.length}件往事` : marker.name, kind: "event", events: marker.events, x: rect.x-bounds.x, y: rect.y-bounds.y });
-            };
-            pin.onpointerenter = showHover; pin.onfocus = showHover;
-            pin.onblur = () => callbacks.current.onHover(null);
-            pin.onpointerleave = () => callbacks.current.onHover(null);
-            pin.onpointerdown = event => event.stopPropagation();
-            pin.onclick = event => {event.stopPropagation(); callbacks.current.onSelect(marker.events);};
+            pin.type = "button"; pin.className = "globe-pin-focus";
+            pin.style.setProperty("--marker-color", event.color);
+            pin.setAttribute("aria-label", `${event.location}：${event.title}，查看详情`);
+            pin.onpointerdown = input => input.stopPropagation();
+            pin.onclick = input => {input.stopPropagation(); callbacks.current.onSelect([event]);};
             return pin;
           })
-          .ringsData(reducedMotion.current ? [] : eventMarkers(data.current, selectedCode.current)).ringLat("lat").ringLng("lng").ringAltitude(0.024)
+          .ringsData(reducedMotion.current ? [] : markerData()).ringLat("lat").ringLng("lng").ringAltitude(0.024)
           .ringColor((e: any) => (t: number) => new THREE.Color(e.color).getStyle().replace("rgb(", "rgba(").replace(")", `,${(1-t)*0.6})`))
           .ringMaxRadius(2.5).ringPropagationSpeed(0.65).ringRepeatPeriod(2600)
           .onPolygonHover((f: any) => {
@@ -203,10 +195,10 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
 
   useEffect(() => {
     if (!api.current) return;
-    const localEvents = eventMarkers(events, selectedCountry);
+    const localEvents = markerData();
     api.current.htmlElementsData(localEvents).ringsData(reducedMotion.current ? [] : localEvents);
 
-  }, [events, selectedCountry]);
+  }, [events, selectedCountry, highlightedEvent]);
 
   useEffect(() => { repaint.current(); }, [selectedCountry]);
 
