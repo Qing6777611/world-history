@@ -99,10 +99,10 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
   }, [time, parts.year, parts.month, parts.day]);
   useEffect(() => {
     if (!region || selected || dateOpen) return;
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") returnToWorld(); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") sendCommand("back"); };
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
-  }, [region, selected, dateOpen, returnToWorld]);
+  }, [region, selected, dateOpen, sendCommand]);
   useEffect(() => {
     const context = (document as unknown as { modelContext?: { registerTool: (tool: unknown, options: { signal: AbortSignal }) => void | Promise<void> } }).modelContext;
     if (!context?.registerTool) return;
@@ -119,9 +119,8 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
     <section className="globe-area" ref={globeArea} aria-label="世界历史探索">
       <div className="keyboard-region-picker"><NativeSelect aria-label="选择国家或地区" disabled={!countries.length} value={region?.code || ""} onChange={e => e.target.value ? setCommand({id:performance.now(),action:"country",code:e.target.value}) : returnToWorld()}><NativeSelectOption value="">全球视图</NativeSelectOption>{countries.map(c => <NativeSelectOption key={c.code} value={c.code}>{c.name}</NativeSelectOption>)}</NativeSelect></div>
       <GlobeView events={events} spinning={!selected && (region ? regionSpinning : spinning)} command={command} selectedCountry={region?.code || null} onRegionSelect={selectRegion} onCountriesReady={setCountries} onSelect={items=>{if(items[0])selectEvent(items[0]);}} onHover={setHover} onReset={returnToWorld} onToggleSpin={() => region ? setRegionSpinning(v => !v) : setSpinning(v => !v)}/>
-      {region && <button className="region-return" onClick={returnToWorld} aria-label="返回全球"><span>{region.name}</span><X size={16}/></button>}
       {isToday && historyStatus!=="ready" && !events.length ? <div className="map-history-status" role="status">{historyStatus==="loading" ? "正在查阅历史上的今天…" : <button onClick={()=>setHistoryAttempt(n=>n+1)}>历史消息暂未加载 · 重试</button>}</div> : !hasRegionEvents && <div className="map-history-status" role="status">{region ? `${region.name} · 暂无当日事件` : "暂无已定位的当日事件"}</div>}
-      {hover && !selected && <div className="map-tooltip" role="status" style={{left:Math.max(12,Math.min(hover.x+16,(globeArea.current?.clientWidth || 700)-140)),top:Math.max(12,Math.min(hover.y+16,(globeArea.current?.clientHeight || 600)-52))}}><strong>{hover.name}</strong><small>点击放大</small></div>}
+      {hover && !selected && <div className="map-tooltip" role="status" style={{left:Math.max(12,Math.min(hover.x+16,(globeArea.current?.clientWidth || 700)-180)),top:Math.max(12,Math.min(hover.y+16,(globeArea.current?.clientHeight || 600)-52))}}><strong>{hover.name}</strong><small>{hover.hint || "点击放大"}</small></div>}
     </section>
 
     <section className="timeline" aria-label="历史时间轴">

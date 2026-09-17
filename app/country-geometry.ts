@@ -47,7 +47,7 @@ function area(ring: Coordinate[]) {
 
 // Fit the clicked landmass and nearby islands, preserving dateline continuity.
 // Distant overseas territories remain the same color without pulling the camera away.
-export function countryView(f: CountryFeature, aspect: number, fov: number, point?: { lat: number; lng: number }) {
+export function countryView(f: CountryFeature, aspect: number, fov: number, point?: { lat: number; lng: number }, minAltitude = .16, maxIslandGap = 3) {
   const parts = polygons(f);
   let seed = point ? parts.findIndex(rings => contains(rings[0], [point.lng, point.lat]) && !rings.slice(1).some(r => contains(r, [point.lng, point.lat]))) : -1;
   if (seed < 0) seed = parts.reduce((best, rings, i) => area(rings[0]) > area(parts[best][0]) ? i : best, 0);
@@ -55,7 +55,7 @@ export function countryView(f: CountryFeature, aspect: number, fov: number, poin
   while (queue.length) {
     const current = queue.shift()!;
     parts.forEach((rings, i) => {
-      if (!included.has(i) && parts[current][0].some(a => rings[0].some(b => angularDistance(a, b) <= 3*RAD))) { included.add(i); queue.push(i); }
+      if (!included.has(i) && parts[current][0].some(a => rings[0].some(b => angularDistance(a, b) <= maxIslandGap*RAD))) { included.add(i); queue.push(i); }
     });
   }
   const points = [...included].flatMap(i => parts[i][0]);
@@ -70,7 +70,7 @@ export function countryView(f: CountryFeature, aspect: number, fov: number, poin
   const radius = Math.max(...points.map(p => angularDistance([lng,lat],p)));
   const halfFov = Math.min(fov*RAD/2, Math.atan(Math.tan(fov*RAD/2)*Math.max(.2, aspect)))*.82;
   const distance = radius >= Math.PI/2 ? 3.5 : Math.max(Math.cos(radius)+Math.sin(radius)/Math.tan(halfFov), 1/Math.cos(radius));
-  return { lat, lng, altitude: Math.max(.16, Math.min(2.5, distance-1)) };
+  return { lat, lng, altitude: Math.max(minAltitude, Math.min(2.5, distance-1)) };
 }
 
 // Adjacent countries receive different colors; color denotes geography, not data.
