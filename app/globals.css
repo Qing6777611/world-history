@@ -34,4 +34,4 @@
 @media(max-width:850px){.country-color-key{bottom:96px}.region-context{padding-bottom:12px}.region-empty{padding-top:12px}}
 @media(max-width:520px){.region-navigation{top:12px}.region-picker select{font-size:12px}.region-picker [data-slot=native-select-wrapper]{max-width:190px}.back-to-world{padding:0 9px}.country-color-key{bottom:60px;font-size:10px}.globe-area{height:430px}.globe-wrap{top:52px}.region-empty{padding-bottom:8px}.region-context{padding-top:0}}
 
-@media(min-width:521px) and (max-width:1150px){.globe-wrap{bottom:120px}}
+@media(min-width:521px) and (max-width:1150px){.globe-wrap{bottom:120px}.country-color-key{display:none}}
