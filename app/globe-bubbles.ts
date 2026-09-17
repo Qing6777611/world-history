@@ -29,15 +29,16 @@ export function createGlobeBubble(group:GlobeBubble, callbacks:{
     button.className="globe-bubble";
     button.style.setProperty("--bubble-index",String(index));
     const title=notificationCopy(event).title;
-    button.setAttribute("aria-label",`${group.name}：${title}，${yearLabel(event.start)}${index===0 && group.events.length>1 ? "，展开消息或查看详情" : "，查看详情"}`);
+    const eventYear=event.historical?.year ?? event.start;
+    button.setAttribute("aria-label",`${group.name}：${title}，${yearLabel(eventYear)}${index===0 && group.events.length>1 ? "，展开消息或查看详情" : "，查看详情"}`);
     const label=document.createElement("span");
     label.className="globe-bubble-title";
     label.textContent=title;
     const year=document.createElement("span");
     year.className="globe-bubble-year";
-    year.textContent=`${Math.abs(event.start)}${event.start<0 ? " BCE" : "年"}`;
+    year.textContent=`${eventYear<0 ? "公元前" : ""}${Math.abs(eventYear)}年`;
     year.setAttribute("aria-hidden","true");
-    button.appendChild(label);button.appendChild(year);
+    button.appendChild(year);button.appendChild(label);
     button.onclick=input=>{
       input.stopPropagation();
       if(group.events.length>1 && !expanded){expand();return;}
