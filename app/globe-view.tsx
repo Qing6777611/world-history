@@ -2,21 +2,22 @@
 
 import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, RotateCcw } from "lucide-react";
-import { hasCoordinates, type AtlasEvent } from "./demo-data";
+import { type AtlasEvent } from "./demo-data";
+import { countryMessages } from "./notification-events";
+import { createGlobeBubble, type GlobeBubble } from "./globe-bubbles";
 import { atlasCountries, countryCode, countryRegion, countryPalette, countryView, type CountryFeature, type CountryRegion } from "./country-geometry";
 
 export type GlobeCommand = { id: number; action: "in" | "out" | "reset" | "focus" | "country"; lat?: number; lng?: number; code?: string };
 export type HoverInfo = { name: string; kind: "country" | "event"; events: AtlasEvent[]; x: number; y: number } | null;
-type Props = { events: AtlasEvent[]; highlightedEvent: AtlasEvent | null; spinning: boolean; command: GlobeCommand | null; onSelect: (events: AtlasEvent[]) => void; onHover: (info: HoverInfo) => void; selectedCountry: string | null; onRegionSelect: (region: CountryRegion) => void; onCountriesReady: (regions: CountryRegion[]) => void; onReset: () => void; onToggleSpin: () => void };
+type Props = { events: AtlasEvent[]; spinning: boolean; command: GlobeCommand | null; onSelect: (events: AtlasEvent[]) => void; onHover: (info: HoverInfo) => void; selectedCountry: string | null; onRegionSelect: (region: CountryRegion) => void; onCountriesReady: (regions: CountryRegion[]) => void; onReset: () => void; onToggleSpin: () => void };
 
 // Rotation uses one camera state: direct pointer input wins over idle spin.
 // Release velocity decays exponentially into a slow spin in the last direction.
-export default function GlobeView({ events, highlightedEvent, spinning, command, onSelect, onHover, selectedCountry, onRegionSelect, onCountriesReady, onReset, onToggleSpin }: Props) {
+export default function GlobeView({ events, spinning, command, onSelect, onHover, selectedCountry, onRegionSelect, onCountriesReady, onReset, onToggleSpin }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const api = useRef<any>(null);
   const data = useRef(events);
-  const highlighted = useRef(highlightedEvent); highlighted.current=highlightedEvent;
-  const markerData = () => highlighted.current && hasCoordinates(highlighted.current) ? [highlighted.current] : [];
+  const updateBubbles = useRef(() => {});
   const reducedMotion = useRef(false);
   const callbacks = useRef({ onSelect, onHover, onRegionSelect, onCountriesReady, onReset, onToggleSpin });
   const selectedCode = useRef(selectedCountry);
@@ -46,11 +47,22 @@ export default function GlobeView({ events, highlightedEvent, spinning, command,
         const features = atlasCountries(geography.features);
         reducedMotion.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         let hovered: any = null;
+        let closeBubble=()=>{};
+        let bubbleNodes:HTMLElement[]=[];
+        let keyboardReading=false;
         let cursor = { x: 0, y: 0 };
         const palette = countryPalette(features);
         const colors = (f: object) => countryCode(f as CountryFeature) === selectedCode.current ? "#ddbd78" : f === hovered ? "#c9d8c4" : palette.get(countryCode(f as CountryFeature))!;
         const surfaceAltitude = (f: object) => countryCode(f as CountryFeature) === selectedCode.current ? .012 : f === hovered ? .009 : .005;
         const stroke = (f: object) => countryCode(f as CountryFeature) === selectedCode.current ? "#fff1ca" : f === hovered ? "#eff3df" : "#263e43";
+        const bubbleData=():GlobeBubble[]=>countryMessages(data.current,selectedCode.current).map(group=>{
+          const feature=features.find(f=>countryCode(f)===group.country);
+          if(!feature)return {...group,name:group.events[0].location};
+          // A country stack is anchored to its main landmass; event details
+          // still fly to the event's own geographic location.
+          const center=countryView(feature,1,50);
+          return {...group,lat:center.lat,lng:center.lng,name:countryRegion(feature).name};
+        });
         const selectCountry = (f: CountryFeature, point?: {lat: number; lng: number}) => {
           overview.current.active = false;
           const view = countryView(f, element.clientWidth/element.clientHeight, globe.camera().fov, point);
@@ -71,20 +83,17 @@ export default function GlobeView({ events, highlightedEvent, spinning, command,
           .polygonsData(features)
           .polygonAltitude(surfaceAltitude).polygonCapColor(colors).polygonSideColor(() => "#203c43")
           .polygonStrokeColor(stroke).polygonsTransitionDuration(reducedMotion.current ? 0 : 230)
-          .htmlElementsData(markerData()).htmlLat("lat").htmlLng("lng").htmlAltitude(0.035)
+          .htmlElementsData(bubbleData()).htmlLat("lat").htmlLng("lng").htmlAltitude(0.016).htmlTransitionDuration(0)
           .htmlElement((item: any) => {
-            const event = item as AtlasEvent;
-            const pin = document.createElement("button");
-            pin.type = "button"; pin.className = "globe-pin-focus";
-            pin.style.setProperty("--marker-color", event.color);
-            pin.setAttribute("aria-label", `${event.location}：${event.title}，查看详情`);
-            pin.onpointerdown = input => input.stopPropagation();
-            pin.onclick = input => {input.stopPropagation(); callbacks.current.onSelect([event]);};
-            return pin;
+            const node=createGlobeBubble(item as GlobeBubble,{
+              select:event=>callbacks.current.onSelect([event]),
+              enter:()=>{hovered=null;repaint.current();callbacks.current.onHover(null);},
+              expand:close=>{closeBubble();closeBubble=close;},
+              reading:active=>{keyboardReading=active;},
+            });
+            bubbleNodes.push(node);
+            return node;
           })
-          .ringsData(reducedMotion.current ? [] : markerData()).ringLat("lat").ringLng("lng").ringAltitude(0.024)
-          .ringColor((e: any) => (t: number) => new THREE.Color(e.color).getStyle().replace("rgb(", "rgba(").replace(")", `,${(1-t)*0.6})`))
-          .ringMaxRadius(2.5).ringPropagationSpeed(0.65).ringRepeatPeriod(2600)
           .onPolygonHover((f: any) => {
             if (drag.current.active) return;
             hovered = f; repaint.current();
@@ -95,6 +104,7 @@ export default function GlobeView({ events, highlightedEvent, spinning, command,
             selectCountry(f as CountryFeature, point);
           });
         repaint.current = () => globe.polygonCapColor(colors).polygonAltitude(surfaceAltitude).polygonStrokeColor(stroke);
+        updateBubbles.current=()=>{closeBubble();keyboardReading=false;bubbleNodes=[];globe.htmlElementsData(bubbleData());};
         focusCountry.current = code => { const f = features.find(f => countryCode(f) === code); if (f) selectCountry(f); };
         callbacks.current.onCountriesReady(features.map(countryRegion).sort((a,b) => a.name.localeCompare(b.name,"zh-CN")));
         api.current = globe;
@@ -120,6 +130,7 @@ export default function GlobeView({ events, highlightedEvent, spinning, command,
         const resize = new ResizeObserver(refresh); resize.observe(element);
         const down = (event: PointerEvent) => {
           if (event.button !== 0 || drag.current.active) return;
+          closeBubble();
           flight.current = null;
           drag.current = { active: true, x: event.clientX, y: event.clientY, last: performance.now(), moved: 0, ended: 0, pointer: event.pointerId };
           camera.current.vx = 0; camera.current.vy = 0;
@@ -155,7 +166,38 @@ export default function GlobeView({ events, highlightedEvent, spinning, command,
         canvas.addEventListener("pointerup", up); canvas.addEventListener("pointercancel", lost);
         canvas.addEventListener("pointerleave", leave); canvas.addEventListener("lostpointercapture", lost);
         canvas.addEventListener("wheel", wheel, { passive: false });
-        let last = performance.now();
+        let last = performance.now(), lastLabelLayout=0;
+        function layoutBubbles(){
+          const bounds=element.getBoundingClientRect();
+          const occupied:{left:number;right:number;top:number;bottom:number}[]=[];
+          // Lift nearby labels along their stems, then omit a lower-priority
+          // label only when no clear position remains. Keep an open stack still.
+          const ordered=[...bubbleNodes].sort((a,b)=>Number(b.dataset.expanded==="true")-Number(a.dataset.expanded==="true") || Number(b.dataset.stacked==="true")-Number(a.dataset.stacked==="true"));
+          for(const node of ordered){
+            if(!node.isConnected || node.style.display==="none")continue;
+            const panel=node.firstElementChild as HTMLElement;
+            const anchorX=node.getBoundingClientRect().x;
+            const half=panel.offsetWidth/2;
+            const shift=Math.max(bounds.left+8+half-anchorX,Math.min(0,bounds.right-8-half-anchorX));
+            node.style.setProperty("--bubble-shift",`${shift}px`);
+            const previousLift=Number(node.dataset.lift || 0);
+            const box=panel.getBoundingClientRect();
+            const choices=node.dataset.expanded==="true" ? [previousLift] : [0,52,104];
+            let chosen=previousLift, placed={left:box.left,right:box.right,top:box.top,bottom:box.bottom}, overlap=true;
+            for(const lift of choices){
+              const candidate={left:box.left,right:box.right,top:box.top+previousLift-lift,bottom:box.bottom+previousLift-lift};
+              if(candidate.top<bounds.top+8)continue;
+              if(!occupied.some(other=>candidate.left<other.right+8 && candidate.right+8>other.left && candidate.top<other.bottom+8 && candidate.bottom+8>other.top)){
+                chosen=lift;placed=candidate;overlap=false;break;
+              }
+            }
+            node.dataset.lift=String(chosen);
+            node.style.setProperty("--bubble-lift",`${chosen}px`);
+            node.dataset.obscured=String(overlap);
+            node.inert=overlap;
+            if(!overlap)occupied.push(placed);
+          }
+        }
         function tick(now: number) {
           const dt = Math.min((now-last)/1000, 0.05); last = now;
           const c = camera.current;
@@ -165,7 +207,7 @@ export default function GlobeView({ events, highlightedEvent, spinning, command,
             c.lng += delta*blend; c.lat += (f.lat-c.lat)*blend;
             if (Math.abs(delta)<0.05 && Math.abs(f.lat-c.lat)<0.05) { c.lng = f.lng; c.lat = f.lat; flight.current = null; }
           } else if (!drag.current.active) {
-            const target = spin.current ? c.direction*1.7 : 0;
+            const target = spin.current && !keyboardReading ? c.direction*1.7 : 0;
             c.vx = target+(c.vx-target)*Math.exp(-dt*1.45);
             c.vy *= Math.exp(-dt*3.8);
             c.lng += c.vx*dt; c.lat = Math.max(-78, Math.min(78, c.lat+c.vy*dt));
@@ -173,6 +215,7 @@ export default function GlobeView({ events, highlightedEvent, spinning, command,
           c.lng = ((c.lng+180)%360+360)%360-180;
           c.altitude += (c.targetAltitude-c.altitude)*(1-Math.exp(-dt*7));
           globe.pointOfView({ lat: c.lat, lng: c.lng, altitude: c.altitude }, 0);
+          if(now-lastLabelLayout>90){layoutBubbles();lastLabelLayout=now;}
           element.dataset.longitude = c.lng.toFixed(3);
           element.dataset.latitude = c.lat.toFixed(3);
           element.dataset.altitude = c.altitude.toFixed(3);
@@ -186,7 +229,7 @@ export default function GlobeView({ events, highlightedEvent, spinning, command,
           canvas.removeEventListener("pointerdown", down); canvas.removeEventListener("pointermove", move);
           canvas.removeEventListener("pointerup", up); canvas.removeEventListener("pointercancel", lost);
           canvas.removeEventListener("pointerleave", leave); canvas.removeEventListener("lostpointercapture", lost); canvas.removeEventListener("wheel", wheel);
-          globe._destructor(); api.current = null; repaint.current = () => {}; focusCountry.current = () => {}; element.replaceChildren();
+          globe._destructor(); api.current = null; repaint.current = () => {}; updateBubbles.current=()=>{}; focusCountry.current = () => {}; element.replaceChildren();
         };
       } catch (err) { console.error("Globe could not initialize", err); if (!cancelled) setStatus("error"); }
     }
@@ -194,11 +237,8 @@ export default function GlobeView({ events, highlightedEvent, spinning, command,
   }, [attempt]);
 
   useEffect(() => {
-    if (!api.current) return;
-    const localEvents = markerData();
-    api.current.htmlElementsData(localEvents).ringsData(reducedMotion.current ? [] : localEvents);
-
-  }, [events, selectedCountry, highlightedEvent]);
+    updateBubbles.current();
+  }, [events, selectedCountry]);
 
   useEffect(() => { repaint.current(); }, [selectedCountry]);
 

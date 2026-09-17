@@ -12,8 +12,6 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import GlobeView, { type GlobeCommand, type HoverInfo } from "./globe-view";
-import NotificationStack from "./notification-stack";
-import { notificationEvents } from "./notification-events";
 import type { CountryRegion } from "./country-geometry";
 import type { DayHistory } from "./on-this-day";
 import { DAY, getMaxTime, MIN_TIME, clampTime, dateParts, eventsAt, timestamp, yearLabel, localToday, hasCoordinates, type AtlasEvent } from "./demo-data";
@@ -29,8 +27,6 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
   const [regionSpinning, setRegionSpinning] = useState(false);
   const [countries, setCountries] = useState<CountryRegion[]>([]);
   const [selected, setSelected] = useState<{ event: AtlasEvent; time: number } | null>(null);
-  const [highlightedId, setHighlightedId] = useState<string | null>(null);
-  const detailTrigger = useRef<HTMLElement | null>(null);
   const [history, setHistory] = useState<DayHistory | null>(null);
   const [historyStatus, setHistoryStatus] = useState<"loading" | "ready" | "error">("loading");
   const [historyAttempt, setHistoryAttempt] = useState(0);
@@ -51,13 +47,12 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
   const events = useMemo(() => isToday ? todaysEvents : eventsAt(time, maxYear), [isToday, todaysEvents, time, maxYear]);
   const eventsRef = useRef(events); eventsRef.current=events;
   const statusRef = useRef(historyStatus); statusRef.current=historyStatus;
-  const messages = useMemo(()=>notificationEvents(region ? events.filter(e=>e.country===region.code) : events),[events,region]);
-  const highlightedEvent=selected?.event || messages.find(event=>event.id===highlightedId) || messages[0] || null;
-  const changeTime = useCallback((t: number) => { setTime(clampTime(Math.round(t/DAY)*DAY, maxYear)); setHover(null); setHighlightedId(null); setSelected(null);  }, [maxYear]);
+  const hasRegionEvents=events.some(event=>(!region || event.country===region.code) && hasCoordinates(event));
+  const changeTime = useCallback((t: number) => { setTime(clampTime(Math.round(t/DAY)*DAY, maxYear)); setHover(null); setSelected(null);  }, [maxYear]);
   const sendCommand = useCallback((action: GlobeCommand["action"], lat?: number, lng?: number) => setCommand({ id: performance.now(), action, lat, lng }), []);
-  const selectRegion = useCallback((next: CountryRegion) => { setRegion(next); setRegionSpinning(false); setHover(null); setHighlightedId(null); }, []);
-  const returnToWorld = useCallback(() => { setRegion(null); setHover(null); setHighlightedId(null); sendCommand("reset"); }, [sendCommand]);
-  const selectEvent = useCallback((event: AtlasEvent) => { detailTrigger.current=document.activeElement instanceof HTMLElement ? document.activeElement : null; setSelected({ event, time: timeRef.current }); setHover(null); if(hasCoordinates(event)) sendCommand("focus", event.lat, event.lng); }, [sendCommand]);
+  const selectRegion = useCallback((next: CountryRegion) => { setRegion(next); setRegionSpinning(false); setHover(null); }, []);
+  const returnToWorld = useCallback(() => { setRegion(null); setHover(null); sendCommand("reset"); }, [sendCommand]);
+  const selectEvent = useCallback((event: AtlasEvent) => { setSelected({ event, time: timeRef.current }); setHover(null); if(hasCoordinates(event)) sendCommand("focus", event.lat, event.lng); }, [sendCommand]);
 
   useEffect(() => {
     // Hydrate from the server, then follow the visitor's calendar (including midnight).
@@ -119,13 +114,14 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
   }, [changeTime, maxYear]);
 
   const percent = (time-MIN_TIME)/(maxTime-MIN_TIME)*100;
-  return <main className="atlas-app has-notifications">
+  return <main className="atlas-app">
     <h1 className="sr-only">纪元 · 世界历史地图</h1>
     <section className="globe-area" ref={globeArea} aria-label="世界历史探索">
       <div className="keyboard-region-picker"><NativeSelect aria-label="选择国家或地区" disabled={!countries.length} value={region?.code || ""} onChange={e => e.target.value ? setCommand({id:performance.now(),action:"country",code:e.target.value}) : returnToWorld()}><NativeSelectOption value="">全球视图</NativeSelectOption>{countries.map(c => <NativeSelectOption key={c.code} value={c.code}>{c.name}</NativeSelectOption>)}</NativeSelect></div>
-      <GlobeView events={events} highlightedEvent={highlightedEvent} spinning={!selected && (region ? regionSpinning : spinning)} command={command} selectedCountry={region?.code || null} onRegionSelect={selectRegion} onCountriesReady={setCountries} onSelect={items=>{if(items[0])selectEvent(items[0]);}} onHover={setHover} onReset={returnToWorld} onToggleSpin={() => region ? setRegionSpinning(v => !v) : setSpinning(v => !v)}/>
-      <NotificationStack key={`${time}-${region?.code || "world"}`} events={messages} region={region?.name || null} dateLabel={yearLabel(parts.year)} status={isToday ? historyStatus : "ready"} onSelect={selectEvent} onHighlight={setHighlightedId} onReset={returnToWorld} onRetry={()=>setHistoryAttempt(n=>n+1)}/>
-      {hover && !selected && <div className="map-tooltip" role="status" style={{left:Math.max(12,Math.min(hover.x+18,(globeArea.current?.clientWidth || 700)-244)),top:Math.max(12,Math.min(hover.y+18,(globeArea.current?.clientHeight || 600)-150))}}><strong>{hover.name}</strong>{hover.events.length ? hover.events.slice(0,2).map(e=><p key={e.id}><span>{e.historical ? `${Math.abs(e.historical.year)}${e.historical.year<0 ? " BCE" : "年"}` : "演示"}</span>{e.title}</p>) : <p className="muted">{isToday ? historyStatus==="loading" ? "正在查阅历史…" : historyStatus==="error" ? "历史资料暂时无法加载" : "暂无已定位的当日事件" : "暂无演示事件"}</p>}<small>{hover.kind === "country" ? "点击放大" : "点击查看详情"}</small></div>}
+      <GlobeView events={events} spinning={!selected && (region ? regionSpinning : spinning)} command={command} selectedCountry={region?.code || null} onRegionSelect={selectRegion} onCountriesReady={setCountries} onSelect={items=>{if(items[0])selectEvent(items[0]);}} onHover={setHover} onReset={returnToWorld} onToggleSpin={() => region ? setRegionSpinning(v => !v) : setSpinning(v => !v)}/>
+      {region && <button className="region-return" onClick={returnToWorld} aria-label="返回全球"><span>{region.name}</span><X size={16}/></button>}
+      {isToday && historyStatus!=="ready" && !events.length ? <div className="map-history-status" role="status">{historyStatus==="loading" ? "正在查阅历史上的今天…" : <button onClick={()=>setHistoryAttempt(n=>n+1)}>历史消息暂未加载 · 重试</button>}</div> : !hasRegionEvents && <div className="map-history-status" role="status">{region ? `${region.name} · 暂无当日事件` : "暂无已定位的当日事件"}</div>}
+      {hover && !selected && <div className="map-tooltip" role="status" style={{left:Math.max(12,Math.min(hover.x+16,(globeArea.current?.clientWidth || 700)-140)),top:Math.max(12,Math.min(hover.y+16,(globeArea.current?.clientHeight || 600)-52))}}><strong>{hover.name}</strong><small>点击放大</small></div>}
     </section>
 
     <section className="timeline" aria-label="历史时间轴">
@@ -136,7 +132,7 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
       <span className="sr-only">当前进度 {Math.round(percent)}%。方向键逐日调整，点击日期可输入准确日期。</span>
     </section>
 
-    <Sheet open={!!selected} onOpenChange={open=>{if(!open)closeDetails();}}><SheetContent className="event-sheet" showCloseButton={false} onCloseAutoFocus={event=>{event.preventDefault();const target=detailTrigger.current?.isConnected ? detailTrigger.current : document.querySelector<HTMLElement>(".current-year");target?.focus({preventScroll:true});}}>
+    <Sheet open={!!selected} onOpenChange={open=>{if(!open)closeDetails();}}><SheetContent className="event-sheet" showCloseButton={false} onCloseAutoFocus={event=>{event.preventDefault();const target=document.querySelector<HTMLElement>(".globe-canvas");target?.focus({preventScroll:true});}}>
       <div className="sheet-top"><span>{selected?.event.historical ? "历史上的今天" : "演示事件"}</span><SheetClose className="icon-button" aria-label="关闭事件详情"><X size={20}/></SheetClose></div>
       {selected && <><SheetHeader><SheetTitle>{selected.event.title}</SheetTitle><SheetDescription>{selected.event.historical ? `${yearLabel(selected.event.historical.year)} ${selected.event.historical.month}月${selected.event.historical.day}日` : `${selected.event.location} · ${yearLabel(dateParts(selected.time).year)}`}</SheetDescription></SheetHeader><div className="sheet-content">
         {selected.event.summary && <p>{selected.event.summary}</p>}

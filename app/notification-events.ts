@@ -1,4 +1,4 @@
-import type { AtlasEvent } from "./demo-data";
+import { hasCoordinates, type AtlasEvent } from "./demo-data";
 
 // A small editorial selection for the interaction prototype. Priority is
 // explicit; recency is not used as a substitute for historical importance.
@@ -10,6 +10,9 @@ const FEATURED = [
   {year:2011,match:/華爾街|华尔街/,title:"占领华尔街运动开始",preview:"示威者走进纽约金融区，一场运动由此展开。",priority:80},
   {year:2008,match:/残疾人奥运会|殘疾人奧運會/,title:"北京残奥会闭幕",preview:"第十三届夏季残奥会在北京落下帷幕。",priority:75},
   {year:1999,match:/首都.*機場|首都.*机场/,title:"首都机场 T2 航站楼启用",preview:"北京首都国际机场迎来新的航站楼。",priority:65},
+  {year:2004,match:/帕拉林匹克/,title:"雅典残奥会开幕",priority:55},
+  {year:1631,match:/布賴滕費爾德|布赖滕费尔德/,title:"布赖滕费尔德战役",priority:50},
+  {year:1567,match:/稻葉山城|稻叶山城/,title:"信长攻陷稻叶山城",priority:45},
 ];
 function featured(event:AtlasEvent) {
   return event.historical?.month===9 && event.historical.day===17 ? FEATURED.find(f=>f.year===event.start && f.match.test(event.title)) : undefined;
@@ -18,7 +21,17 @@ export function notificationCopy(event:AtlasEvent) {
   const copy=featured(event);
   return {title:copy?.title || event.title, preview:copy?.preview || (event.historical ? event.location : `${event.location} · ${event.category}的历史片段`)};
 }
-export function notificationEvents(events:AtlasEvent[]) {
-  return events.map((event,index)=>({event,index,priority:featured(event)?.priority || 0}))
-    .sort((a,b)=>b.priority-a.priority || a.index-b.index).slice(0,3).map(({event})=>event);
+export type CountryMessages = { country: string; lat: number; lng: number; events: AtlasEvent[] };
+export function countryMessages(events:AtlasEvent[], selectedCountry:string|null) {
+  const ordered=events.map((event,index)=>({event,index,priority:featured(event)?.priority || 0}))
+    .sort((a,b)=>b.priority-a.priority || a.index-b.index);
+  const groups=new Map<string,CountryMessages>();
+  for(const {event} of ordered){
+    const country=event.country==="TWN" ? "CHN" : event.country || `place:${event.location}`;
+    if(!hasCoordinates(event) || (selectedCountry && country!==selectedCountry))continue;
+    if(!groups.has(country))groups.set(country,{country,lat:event.lat,lng:event.lng,events:[]});
+    const group=groups.get(country)!;
+    if(group.events.length<3)group.events.push(event);
+  }
+  return [...groups.values()].slice(0,6);
 }
