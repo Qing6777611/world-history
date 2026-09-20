@@ -7,7 +7,7 @@ import { type AtlasEvent } from "./demo-data";
 import { countryMessages } from "./notification-events";
 import { createGlobeBubble, type GlobeBubble } from "./globe-bubbles";
 import { createGlobeSky } from "./globe-sky";
-import { timelineTravelSpeed, type TimelineMotion } from "./timeline-motion";
+import { MAX_TIME_TRAVEL_SPEED, timelineTravelSpeed, type TimelineMotion } from "./timeline-motion";
 import { adminColor, containsPlace, featureCenter, isAdmin, loadDivisions, type AdminFeature, type AdminCollection, type City } from "./admin-geography";
 import { atlasCountries, countryCode, countryRegion, countryPalette, countryView, type CountryFeature, type CountryRegion } from "./country-geometry";
 
@@ -343,13 +343,13 @@ export default function GlobeView({ events, timelineMotion, spinning, command, o
           } else if (!drag.current.active) {
             const idle = spin.current && !keyboardReading ? c.direction*1.7 : 0;
             const target = !regional && travelSpeed ? travelSpeed*Math.min(1,c.altitude/.9) : idle;
-            c.vx = target+(c.vx-target)*Math.exp(-dt*(!regional && Math.abs(travelSpeed)>2 ? 9 : 1.8));
+            c.vx = target+(c.vx-target)*Math.exp(-dt*(!regional && Math.abs(travelSpeed)>2 ? 16 : 1.8));
             c.vy *= Math.exp(-dt*3.8);
             c.lng += c.vx*dt; c.lat = Math.max(-78, Math.min(78, c.lat+c.vy*dt));
           }
           // At a country/province, rock the view by a bounded angle instead of
           // integrating velocity. It returns to the same place after release.
-          const offsetTarget=regional && !flight.current ? travelSpeed/54*Math.min(2,c.altitude*4) : 0;
+          const offsetTarget=regional && !flight.current ? travelSpeed/MAX_TIME_TRAVEL_SPEED*Math.min(2,c.altitude*4) : 0;
           timeTravelOffset+=(offsetTarget-timeTravelOffset)*(1-Math.exp(-dt*7));
           if(reducedMotion.current)timeTravelOffset=0;
           c.lng = ((c.lng+180)%360+360)%360-180;
