@@ -1,7 +1,7 @@
 import { yearLabel, type AtlasEvent } from "./demo-data";
 import { notificationCopy, type CountryMessages } from "./notification-events";
 
-export type GlobeBubble = CountryMessages & { name: string };
+export type GlobeBubble = CountryMessages & { name: string; selected?: boolean };
 
 // The renderer owns the anchor's transform. All presentation and folding stay
 // inside it, so the speech bubble follows the country's surface as it rotates.
@@ -14,6 +14,9 @@ export function createGlobeBubble(group:GlobeBubble, callbacks:{
   const anchor=document.createElement("div");
   anchor.className="globe-bubble-anchor";
   anchor.dataset.country=group.country;
+  anchor.dataset.latitude=String(group.lat);
+  anchor.dataset.longitude=String(group.lng);
+  anchor.dataset.selected=String(!!group.selected);
   anchor.dataset.stacked=String(group.events.length>1);
   const panel=document.createElement("div");
   panel.className="globe-bubble-panel";
@@ -27,6 +30,7 @@ export function createGlobeBubble(group:GlobeBubble, callbacks:{
     const button=document.createElement("button");
     button.type="button";
     button.className="globe-bubble";
+    button.dataset.eventId=event.id;
     button.style.setProperty("--bubble-index",String(index));
     const title=notificationCopy(event).title;
     const eventYear=event.historical?.year ?? event.start;

@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, RotateCcw, X, ChevronRight } from "lucide-react";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { type AtlasEvent } from "./demo-data";
-import { countryMessages } from "./notification-events";
+import { hasCoordinates, type AtlasEvent } from "./demo-data";
+import { countryMessages, locationMessages } from "./notification-events";
 import { createGlobeBubble, type GlobeBubble } from "./globe-bubbles";
 import { createGlobeSky } from "./globe-sky";
 import { adminColor, containsPlace, featureCenter, isAdmin, loadDivisions, type AdminFeature, type AdminCollection, type City } from "./admin-geography";
@@ -13,14 +13,15 @@ import { atlasCountries, countryCode, countryRegion, countryPalette, countryView
 export type GlobeCommand = { id: number; action: "in" | "out" | "reset" | "focus" | "country" | "back"; lat?: number; lng?: number; code?: string };
 export type HoverInfo = { name: string; kind: "country" | "event" | "division" | "city"; events: AtlasEvent[]; x: number; y: number; hint?: string } | null;
 type GeographyView = { country: string; province: AdminFeature | null; choices: AdminFeature[]; status: "loading" | "ready" | "error"; label: string; source: string; sourceUrl: string };
-type Props = { events: AtlasEvent[]; spinning: boolean; command: GlobeCommand | null; onSelect: (events: AtlasEvent[]) => void; onHover: (info: HoverInfo) => void; selectedCountry: string | null; onRegionSelect: (region: CountryRegion) => void; onCountriesReady: (regions: CountryRegion[]) => void; onReset: () => void; onToggleSpin: () => void };
+type Props = { events: AtlasEvent[]; selectedEvent: AtlasEvent | null; spinning: boolean; command: GlobeCommand | null; onSelect: (events: AtlasEvent[]) => void; onHover: (info: HoverInfo) => void; selectedCountry: string | null; onRegionSelect: (region: CountryRegion) => void; onCountriesReady: (regions: CountryRegion[]) => void; onReset: () => void; onToggleSpin: () => void };
 
 // Rotation uses one camera state: direct pointer input wins over idle spin.
 // Release velocity decays exponentially into a slow spin in the last direction.
-export default function GlobeView({ events, spinning, command, onSelect, onHover, selectedCountry, onRegionSelect, onCountriesReady, onReset, onToggleSpin }: Props) {
+export default function GlobeView({ events, selectedEvent, spinning, command, onSelect, onHover, selectedCountry, onRegionSelect, onCountriesReady, onReset, onToggleSpin }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const api = useRef<any>(null);
   const data = useRef(events);
+  const activeEvent = useRef(selectedEvent); activeEvent.current=selectedEvent;
   const updateBubbles = useRef(() => {});
   const reducedMotion = useRef(false);
   const callbacks = useRef({ onSelect, onHover, onRegionSelect, onCountriesReady, onReset, onToggleSpin });
@@ -88,14 +89,25 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
           if(!selectedCode.current)return globalCities;
           return cities.filter(city=>city.country===selectedCode.current && (!selectedProvince || containsPlace(selectedProvince,city))).slice(0,selectedProvince ? 100 : 60);
         };
-        const bubbleData=():GlobeBubble[]=>countryMessages(data.current,selectedCode.current).map(group=>{
-          const feature=features.find(f=>countryCode(f)===group.country);
-          if(!feature)return {...group,name:group.events[0].location};
-          // A country stack is anchored to its main landmass; event details
-          // still fly to the event's own geographic location.
-          const center=countryView(feature,1,50);
-          return {...group,lat:center.lat,lng:center.lng,name:countryRegion(feature).name};
-        });
+        const bubbleData=():GlobeBubble[]=>{
+          const event=activeEvent.current;
+          const country=selectedCode.current || (event ? event.country==="TWN" ? "CHN" : event.country || `place:${event.location}` : null);
+          if(country){
+            const feature=features.find(f=>countryCode(f)===country);
+            const fallback=feature ? countryView(feature,1,50) : undefined;
+            return locationMessages(data.current,country,event?.id,fallback).map(group=>({
+              ...group,
+              name:hasCoordinates(group.events[0]) ? group.events[0].location : feature ? countryRegion(feature).name : group.events[0].location,
+              selected:group.events.some(item=>item.id===event?.id),
+            }));
+          }
+          return countryMessages(data.current,null).map(group=>{
+            const feature=features.find(f=>countryCode(f)===group.country);
+            if(!feature)return {...group,name:group.events[0].location};
+            const center=countryView(feature,1,50);
+            return {...group,lat:center.lat,lng:center.lng,name:countryRegion(feature).name};
+          });
+        };
         const flyToFeature = (f: CountryFeature, point?: {lat: number; lng: number}) => {
           overview.current.active = false;
           const {width,height,availableHeight}=viewport();
@@ -286,7 +298,7 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
           const occupied:{left:number;right:number;top:number;bottom:number}[]=[];
           // Lift nearby labels along their stems, then omit a lower-priority
           // label only when no clear position remains. Keep an open stack still.
-          const ordered=[...bubbleNodes].sort((a,b)=>Number(b.dataset.expanded==="true")-Number(a.dataset.expanded==="true") || Number(b.dataset.stacked==="true")-Number(a.dataset.stacked==="true"));
+          const ordered=[...bubbleNodes].sort((a,b)=>Number(b.dataset.selected==="true")-Number(a.dataset.selected==="true") || Number(b.dataset.expanded==="true")-Number(a.dataset.expanded==="true") || Number(b.dataset.stacked==="true")-Number(a.dataset.stacked==="true"));
           for(const node of ordered){
             if(!node.isConnected || node.style.display==="none")continue;
             const panel=node.firstElementChild as HTMLElement;
@@ -377,7 +389,7 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
 
   useEffect(() => {
     updateBubbles.current();
-  }, [events, selectedCountry]);
+  }, [events, selectedCountry, selectedEvent]);
 
   useEffect(() => { repaint.current(); }, [selectedCountry]);
   useEffect(() => { syncGeography.current(); }, [selectedCountry]);
@@ -392,7 +404,15 @@ export default function GlobeView({ events, spinning, command, onSelect, onHover
     if (command.action === "in") c.targetAltitude = Math.max(.025, c.targetAltitude/1.28);
     if (command.action === "out") c.targetAltitude = Math.min(Math.max(3.3, overview.current.altitude*1.35), c.targetAltitude*1.28);
     if (command.action === "reset") { overview.current.active = true; flight.current = { lat: 21, lng: 68 }; c.targetAltitude = overview.current.altitude; c.vx = spin.current ? c.direction*1.7 : 0; c.vy = 0; }
-    if (command.action === "focus") { overview.current.active = false; c.vx = 0; c.vy = 0; c.targetAltitude = Math.min(c.targetAltitude, .65); flight.current = { lat: command.lat ?? 21, lng: command.lng ?? 68 }; }
+    if (command.action === "focus") {
+      const hasPoint=Number.isFinite(command.lat) && Number.isFinite(command.lng);
+      if(command.code && (command.code!==selectedCode.current || !hasPoint))focusCountry.current(command.code);
+      if(hasPoint){
+        overview.current.active=false;c.vx=0;c.vy=0;
+        c.targetAltitude=Math.min(c.targetAltitude,.65);
+        flight.current={lat:command.lat!,lng:command.lng!};
+      }
+    }
     if (command.action === "country" && command.code) focusCountry.current(command.code);
   }, [command]);
 

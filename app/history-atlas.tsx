@@ -47,12 +47,15 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
   const events = useMemo(() => isToday ? todaysEvents : eventsAt(time, maxYear), [isToday, todaysEvents, time, maxYear]);
   const eventsRef = useRef(events); eventsRef.current=events;
   const statusRef = useRef(historyStatus); statusRef.current=historyStatus;
-  const hasRegionEvents=events.some(event=>(!region || event.country===region.code) && hasCoordinates(event));
+  const hasRegionEvents=events.some(event=>region ? event.country===region.code : hasCoordinates(event));
   const changeTime = useCallback((t: number) => { setTime(clampTime(Math.round(t/DAY)*DAY, maxYear)); setHover(null); setSelected(null);  }, [maxYear]);
   const sendCommand = useCallback((action: GlobeCommand["action"], lat?: number, lng?: number) => setCommand({ id: performance.now(), action, lat, lng }), []);
   const selectRegion = useCallback((next: CountryRegion) => { setRegion(next); setRegionSpinning(false); setHover(null); }, []);
   const returnToWorld = useCallback(() => { setRegion(null); setHover(null); sendCommand("reset"); }, [sendCommand]);
-  const selectEvent = useCallback((event: AtlasEvent) => { setSelected({ event, time: timeRef.current }); setHover(null); if(hasCoordinates(event)) sendCommand("focus", event.lat, event.lng); }, [sendCommand]);
+  const selectEvent = useCallback((event: AtlasEvent) => {
+    setSelected({event,time:timeRef.current});setHover(null);
+    setCommand({id:performance.now(),action:"focus",code:event.country==="TWN" ? "CHN" : event.country,lat:event.lat,lng:event.lng});
+  }, []);
 
   useEffect(() => {
     // Hydrate from the server, then follow the visitor's calendar (including midnight).
@@ -118,7 +121,7 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
     <h1 className="sr-only">纪元 · 世界历史地图</h1>
     <section className="globe-area" ref={globeArea} aria-label="世界历史探索">
       <div className="keyboard-region-picker"><NativeSelect aria-label="选择国家或地区" disabled={!countries.length} value={region?.code || ""} onChange={e => e.target.value ? setCommand({id:performance.now(),action:"country",code:e.target.value}) : returnToWorld()}><NativeSelectOption value="">全球视图</NativeSelectOption>{countries.map(c => <NativeSelectOption key={c.code} value={c.code}>{c.name}</NativeSelectOption>)}</NativeSelect></div>
-      <GlobeView events={events} spinning={!selected && (region ? regionSpinning : spinning)} command={command} selectedCountry={region?.code || null} onRegionSelect={selectRegion} onCountriesReady={setCountries} onSelect={items=>{if(items[0])selectEvent(items[0]);}} onHover={setHover} onReset={returnToWorld} onToggleSpin={() => region ? setRegionSpinning(v => !v) : setSpinning(v => !v)}/>
+      <GlobeView events={events} selectedEvent={selected?.event || null} spinning={!selected && (region ? regionSpinning : spinning)} command={command} selectedCountry={region?.code || null} onRegionSelect={selectRegion} onCountriesReady={setCountries} onSelect={items=>{if(items[0])selectEvent(items[0]);}} onHover={setHover} onReset={returnToWorld} onToggleSpin={() => region ? setRegionSpinning(v => !v) : setSpinning(v => !v)}/>
       {isToday && historyStatus!=="ready" && !events.length ? <div className="map-history-status" role="status">{historyStatus==="loading" ? "正在查阅历史上的今天…" : <button onClick={()=>setHistoryAttempt(n=>n+1)}>历史消息暂未加载 · 重试</button>}</div> : !hasRegionEvents && <div className="map-history-status" role="status">{region ? `${region.name} · 暂无当日事件` : "暂无已定位的当日事件"}</div>}
       {hover && !selected && <div className="map-tooltip" role="status" style={{left:Math.max(12,Math.min(hover.x+16,(globeArea.current?.clientWidth || 700)-180)),top:Math.max(12,Math.min(hover.y+16,(globeArea.current?.clientHeight || 600)-52))}}><strong>{hover.name}</strong><small>{hover.hint || "点击放大"}</small></div>}
     </section>
@@ -135,7 +138,7 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
       <div className="sheet-top"><span>{selected?.event.historical ? "历史上的今天" : "演示事件"}</span><SheetClose className="icon-button" aria-label="关闭事件详情"><X size={20}/></SheetClose></div>
       {selected && <><SheetHeader><SheetTitle>{selected.event.title}</SheetTitle><SheetDescription>{selected.event.historical ? `${yearLabel(selected.event.historical.year)} ${selected.event.historical.month}月${selected.event.historical.day}日` : `${selected.event.location} · ${yearLabel(dateParts(selected.time).year)}`}</SheetDescription></SheetHeader><div className="sheet-content">
         {selected.event.summary && <p>{selected.event.summary}</p>}
-        {selected.event.historical ? <><p className="event-place">{hasCoordinates(selected.event) ? `关联地点：${selected.event.location}` : "此条事件尚无可靠地点，暂未标在地图上。"}</p><p className="source-note">{selected.event.historical.locationUrl && <>地图采用关联地点的词条坐标，不代表事件范围。<br/><a href={selected.event.historical.locationUrl} target="_blank" rel="noreferrer">查看地点资料 ↗</a><br/></>}<a href={selected.event.historical.sourceUrl} target="_blank" rel="noreferrer">{selected.event.historical.sourceUrl.includes("wikipedia.org") ? "来源：维基百科" : "来源：美国国务院历史档案"} ↗</a>{selected.event.historical.sourceUrl.includes("wikipedia.org") && <><br/><a href="https://creativecommons.org/licenses/by-sa/4.0/deed.zh-hans" target="_blank" rel="noreferrer">CC BY-SA 4.0</a> · 来源文字整理</>}</p></> : <p className="demo-note">当前内容用于交互演示，历史资料后续补充。</p>}
+        {selected.event.historical ? <><p className="event-place">{hasCoordinates(selected.event) ? `关联地点：${selected.event.location}` : "此条事件尚无可靠城市坐标，暂以国家位置展示。"}</p><p className="source-note">{selected.event.historical.locationUrl && <>地图采用关联地点的词条坐标，不代表事件范围。<br/><a href={selected.event.historical.locationUrl} target="_blank" rel="noreferrer">查看地点资料 ↗</a><br/></>}<a href={selected.event.historical.sourceUrl} target="_blank" rel="noreferrer">{selected.event.historical.sourceUrl.includes("wikipedia.org") ? "来源：维基百科" : "来源：美国国务院历史档案"} ↗</a>{selected.event.historical.sourceUrl.includes("wikipedia.org") && <><br/><a href="https://creativecommons.org/licenses/by-sa/4.0/deed.zh-hans" target="_blank" rel="noreferrer">CC BY-SA 4.0</a> · 来源文字整理</>}</p></> : <p className="demo-note">当前内容用于交互演示，历史资料后续补充。</p>}
       </div></>}
     </SheetContent></Sheet>
     <Dialog open={dateOpen} onOpenChange={setDateOpen}><DialogContent className="atlas-dialog"><DialogHeader><DialogTitle>选择日期</DialogTitle><DialogDescription>负数表示公元前，没有公元 0 年。</DialogDescription></DialogHeader><form onSubmit={event=>{

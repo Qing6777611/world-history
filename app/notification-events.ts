@@ -22,15 +22,35 @@ export function notificationCopy(event:AtlasEvent) {
   return {title:copy?.title || event.title, preview:copy?.preview || (event.historical ? event.location : `${event.location} · ${event.category}的历史片段`)};
 }
 export type CountryMessages = { country: string; lat: number; lng: number; events: AtlasEvent[] };
+function orderedEvents(events:AtlasEvent[], selectedId?:string) {
+  return events.map((event,index)=>({event,index,priority:featured(event)?.priority || 0}))
+    .sort((a,b)=>Number(b.event.id===selectedId)-Number(a.event.id===selectedId) || b.priority-a.priority || a.index-b.index);
+}
 export function countryMessages(events:AtlasEvent[], selectedCountry:string|null) {
-  const ordered=events.map((event,index)=>({event,index,priority:featured(event)?.priority || 0}))
-    .sort((a,b)=>b.priority-a.priority || a.index-b.index);
+  const ordered=orderedEvents(events);
   const groups=new Map<string,CountryMessages>();
   for(const {event} of ordered){
     const country=event.country==="TWN" ? "CHN" : event.country || `place:${event.location}`;
     if(!hasCoordinates(event) || (selectedCountry && country!==selectedCountry))continue;
     if(!groups.has(country))groups.set(country,{country,lat:event.lat,lng:event.lng,events:[]});
     const group=groups.get(country)!;
+    if(group.events.length<3)group.events.push(event);
+  }
+  return [...groups.values()].slice(0,6);
+}
+
+// In a country close-up, a stack belongs to one recorded place, never to
+// multiple cities. The selected event survives both display limits.
+export function locationMessages(events:AtlasEvent[], country:string, selectedId?:string, fallback?:{lat:number;lng:number}) {
+  const groups=new Map<string,CountryMessages>();
+  for(const {event} of orderedEvents(events,selectedId)) {
+    const code=event.country==="TWN" ? "CHN" : event.country || `place:${event.location}`;
+    if(code!==country)continue;
+    const point=hasCoordinates(event) ? event : fallback;
+    if(!point)continue;
+    const key=hasCoordinates(event) ? `${point.lat.toFixed(6)},${point.lng.toFixed(6)}` : "country";
+    if(!groups.has(key))groups.set(key,{country,lat:point.lat,lng:point.lng,events:[]});
+    const group=groups.get(key)!;
     if(group.events.length<3)group.events.push(event);
   }
   return [...groups.values()].slice(0,6);
