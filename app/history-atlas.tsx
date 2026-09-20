@@ -13,7 +13,6 @@ import { Sheet, SheetClose, SheetContent, SheetDescription, SheetHeader, SheetTi
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import GlobeView, { type GlobeCommand, type HoverInfo } from "./globe-view";
 import type { CountryRegion } from "./country-geometry";
-import type { TimelineMotion } from "./timeline-motion";
 import type { DayHistory } from "./on-this-day";
 import { DAY, getMaxTime, MIN_TIME, clampTime, dateParts, eventsAt, timestamp, yearLabel, localToday, hasCoordinates, type AtlasEvent } from "./demo-data";
 
@@ -37,8 +36,6 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
   const [dateError, setDateError] = useState("");
   const [restored, setRestored] = useState(false);
   const timeRef = useRef(time); timeRef.current = time;
-  const timelineMotion = useRef<TimelineMotion>({velocity:0,updatedAt:0,releasedAt:null});
-  const timelineSampleAt = useRef(0);
   const regionRef = useRef(region); regionRef.current = region;
   const globeArea = useRef<HTMLDivElement>(null);
   const parts = dateParts(time);
@@ -52,39 +49,10 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
   const statusRef = useRef(historyStatus); statusRef.current=historyStatus;
   const hasRegionEvents=events.some(event=>(!region || event.country===region.code) && hasCoordinates(event));
   const changeTime = useCallback((t: number) => { setTime(clampTime(Math.round(t/DAY)*DAY, maxYear)); setHover(null); setSelected(null);  }, [maxYear]);
-  const beginTimeline = () => {timelineSampleAt.current=performance.now();};
-  const scrubTimeline = (t:number) => {
-    const next=clampTime(Math.round(t/DAY)*DAY,maxYear), now=performance.now();
-    const delta=next-timeRef.current;
-    if(delta) {
-      const elapsed=Math.max(16,Math.min(160,now-timelineSampleAt.current))/1000;
-      timelineMotion.current={velocity:delta/(maxTime-MIN_TIME)/elapsed,updatedAt:now,releasedAt:null};
-    }
-    timelineSampleAt.current=now;timeRef.current=next;
-    changeTime(next);
-  };
-  const endTimeline = useCallback(() => {
-    if(timelineMotion.current.releasedAt===null)timelineMotion.current.releasedAt=performance.now();
-  }, []);
   const sendCommand = useCallback((action: GlobeCommand["action"], lat?: number, lng?: number) => setCommand({ id: performance.now(), action, lat, lng }), []);
   const selectRegion = useCallback((next: CountryRegion) => { setRegion(next); setRegionSpinning(false); setHover(null); }, []);
   const returnToWorld = useCallback(() => { setRegion(null); setHover(null); sendCommand("reset"); }, [sendCommand]);
   const selectEvent = useCallback((event: AtlasEvent) => { setSelected({ event, time: timeRef.current }); setHover(null); if(hasCoordinates(event)) sendCommand("focus", event.lat, event.lng); }, [sendCommand]);
-
-  useEffect(() => {
-    // Release outside the slider, touch cancellation and losing the window
-    // all finish the gesture; holding a still pointer also loses momentum.
-    window.addEventListener("pointerup",endTimeline);
-    window.addEventListener("pointercancel",endTimeline);
-    window.addEventListener("blur",endTimeline);
-    document.addEventListener("visibilitychange",endTimeline);
-    return () => {
-      window.removeEventListener("pointerup",endTimeline);
-      window.removeEventListener("pointercancel",endTimeline);
-      window.removeEventListener("blur",endTimeline);
-      document.removeEventListener("visibilitychange",endTimeline);
-    };
-  }, [endTimeline]);
 
   useEffect(() => {
     // Hydrate from the server, then follow the visitor's calendar (including midnight).
@@ -150,7 +118,7 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
     <h1 className="sr-only">纪元 · 世界历史地图</h1>
     <section className="globe-area" ref={globeArea} aria-label="世界历史探索">
       <div className="keyboard-region-picker"><NativeSelect aria-label="选择国家或地区" disabled={!countries.length} value={region?.code || ""} onChange={e => e.target.value ? setCommand({id:performance.now(),action:"country",code:e.target.value}) : returnToWorld()}><NativeSelectOption value="">全球视图</NativeSelectOption>{countries.map(c => <NativeSelectOption key={c.code} value={c.code}>{c.name}</NativeSelectOption>)}</NativeSelect></div>
-      <GlobeView events={events} timelineMotion={timelineMotion} spinning={!selected && (region ? regionSpinning : spinning)} command={command} selectedCountry={region?.code || null} onRegionSelect={selectRegion} onCountriesReady={setCountries} onSelect={items=>{if(items[0])selectEvent(items[0]);}} onHover={setHover} onReset={returnToWorld} onToggleSpin={() => region ? setRegionSpinning(v => !v) : setSpinning(v => !v)}/>
+      <GlobeView events={events} spinning={!selected && (region ? regionSpinning : spinning)} command={command} selectedCountry={region?.code || null} onRegionSelect={selectRegion} onCountriesReady={setCountries} onSelect={items=>{if(items[0])selectEvent(items[0]);}} onHover={setHover} onReset={returnToWorld} onToggleSpin={() => region ? setRegionSpinning(v => !v) : setSpinning(v => !v)}/>
       {isToday && historyStatus!=="ready" && !events.length ? <div className="map-history-status" role="status">{historyStatus==="loading" ? "正在查阅历史上的今天…" : <button onClick={()=>setHistoryAttempt(n=>n+1)}>历史消息暂未加载 · 重试</button>}</div> : !hasRegionEvents && <div className="map-history-status" role="status">{region ? `${region.name} · 暂无当日事件` : "暂无已定位的当日事件"}</div>}
       {hover && !selected && <div className="map-tooltip" role="status" style={{left:Math.max(12,Math.min(hover.x+16,(globeArea.current?.clientWidth || 700)-180)),top:Math.max(12,Math.min(hover.y+16,(globeArea.current?.clientHeight || 600)-52))}}><strong>{hover.name}</strong><small>{hover.hint || "点击放大"}</small></div>}
     </section>
@@ -158,7 +126,7 @@ export default function HistoryAtlas({initialToday}: {initialToday: number}) {
     <section className="timeline" aria-label="历史时间轴">
       <div className="day-context">{isToday ? <span>今天</span> : <button onClick={goToday}>回到今天</button>}</div>
       <button className="current-year" onClick={()=>{setDateOpen(true);setDateError("");}} aria-label={`当前${yearLabel(parts.year)} ${parts.month}月${parts.day}日，点击修改日期`} title="点击修改日期">{parts.year < 0 && <span>公元前 </span>}{Math.abs(parts.year)}<span> 年 </span>{String(parts.month).padStart(2,"0")}<span> 月 </span>{String(parts.day).padStart(2,"0")}<span> 日</span></button>
-      <div className="timeline-line"><Slider className="time-slider" min={MIN_TIME} max={maxTime} step={DAY} value={[time]} aria-label="历史日期" onPointerDownCapture={beginTimeline} onPointerUpCapture={endTimeline} onPointerCancelCapture={endTimeline} onLostPointerCapture={endTimeline} onKeyUp={endTimeline} onBlurCapture={endTimeline} onValueChange={v=>scrubTimeline(v[0])} onValueCommit={endTimeline}/><div className="timeline-ticks" aria-hidden="true">{[-500,1,500,1000,1500,maxYear].map(year=><i key={year} style={{left:`${(timestamp(year)-MIN_TIME)/(maxTime-MIN_TIME)*100}%`}}/>)}</div></div>
+      <div className="timeline-line"><Slider className="time-slider" min={MIN_TIME} max={maxTime} step={DAY} value={[time]} aria-label="历史日期" onValueChange={v=>changeTime(v[0])}/><div className="timeline-ticks" aria-hidden="true">{[-500,1,500,1000,1500,maxYear].map(year=><i key={year} style={{left:`${(timestamp(year)-MIN_TIME)/(maxTime-MIN_TIME)*100}%`}}/>)}</div></div>
       <div className="timeline-ends" aria-hidden="true"><span>公元前 500 年</span><span>{maxYear} 年</span></div>
       <span className="sr-only">当前进度 {Math.round(percent)}%。方向键逐日调整，点击日期可输入准确日期。</span>
     </section>

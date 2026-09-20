@@ -1,24 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, RotateCcw, X, ChevronRight } from "lucide-react";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { type AtlasEvent } from "./demo-data";
 import { countryMessages } from "./notification-events";
 import { createGlobeBubble, type GlobeBubble } from "./globe-bubbles";
 import { createGlobeSky } from "./globe-sky";
-import { MAX_TIME_TRAVEL_SPEED, timelineTravelSpeed, type TimelineMotion } from "./timeline-motion";
 import { adminColor, containsPlace, featureCenter, isAdmin, loadDivisions, type AdminFeature, type AdminCollection, type City } from "./admin-geography";
 import { atlasCountries, countryCode, countryRegion, countryPalette, countryView, type CountryFeature, type CountryRegion } from "./country-geometry";
 
 export type GlobeCommand = { id: number; action: "in" | "out" | "reset" | "focus" | "country" | "back"; lat?: number; lng?: number; code?: string };
 export type HoverInfo = { name: string; kind: "country" | "event" | "division" | "city"; events: AtlasEvent[]; x: number; y: number; hint?: string } | null;
 type GeographyView = { country: string; province: AdminFeature | null; choices: AdminFeature[]; status: "loading" | "ready" | "error"; label: string; source: string; sourceUrl: string };
-type Props = { events: AtlasEvent[]; timelineMotion: RefObject<TimelineMotion>; spinning: boolean; command: GlobeCommand | null; onSelect: (events: AtlasEvent[]) => void; onHover: (info: HoverInfo) => void; selectedCountry: string | null; onRegionSelect: (region: CountryRegion) => void; onCountriesReady: (regions: CountryRegion[]) => void; onReset: () => void; onToggleSpin: () => void };
+type Props = { events: AtlasEvent[]; spinning: boolean; command: GlobeCommand | null; onSelect: (events: AtlasEvent[]) => void; onHover: (info: HoverInfo) => void; selectedCountry: string | null; onRegionSelect: (region: CountryRegion) => void; onCountriesReady: (regions: CountryRegion[]) => void; onReset: () => void; onToggleSpin: () => void };
 
 // Rotation uses one camera state: direct pointer input wins over idle spin.
 // Release velocity decays exponentially into a slow spin in the last direction.
-export default function GlobeView({ events, timelineMotion, spinning, command, onSelect, onHover, selectedCountry, onRegionSelect, onCountriesReady, onReset, onToggleSpin }: Props) {
+export default function GlobeView({ events, spinning, command, onSelect, onHover, selectedCountry, onRegionSelect, onCountriesReady, onReset, onToggleSpin }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const api = useRef<any>(null);
   const data = useRef(events);
@@ -54,13 +53,7 @@ export default function GlobeView({ events, timelineMotion, spinning, command, o
         if (cancelled || !host.current) return;
         const element = host.current;
         const features = atlasCountries(geography.features);
-        const motionPreference=window.matchMedia("(prefers-reduced-motion: reduce)");
-        reducedMotion.current = motionPreference.matches;
-        const updateMotionPreference=()=>{
-          reducedMotion.current=motionPreference.matches;
-          if(motionPreference.matches){timelineMotion.current.velocity=0;camera.current.vx=spin.current ? camera.current.direction*1.7 : 0;camera.current.vy=0;}
-        };
-        motionPreference.addEventListener("change",updateMotionPreference);
+        reducedMotion.current = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         let hovered: any = null;
         let closeBubble=()=>{};
         let bubbleNodes:HTMLElement[]=[];
@@ -71,7 +64,6 @@ export default function GlobeView({ events, timelineMotion, spinning, command, o
         let boundaryStatus:GeographyView["status"]="ready", boundaryRequest:AbortController|null=null;
         let boundaryVersion=0;
         let altitudeScale=1;
-        let timeTravelOffset=0;
         const knownCountries=new Set(features.map(countryCode));
         const globalCounts=new Map<string,number>();
         const globalCities=cities.filter(city=>{
@@ -105,7 +97,6 @@ export default function GlobeView({ events, timelineMotion, spinning, command, o
           return {...group,lat:center.lat,lng:center.lng,name:countryRegion(feature).name};
         });
         const flyToFeature = (f: CountryFeature, point?: {lat: number; lng: number}) => {
-          timelineMotion.current.velocity=0;timeTravelOffset=0;
           overview.current.active = false;
           const {width,height,availableHeight}=viewport();
           const effectiveFov=2*Math.atan(Math.tan(globe.camera().fov*Math.PI/360)*availableHeight/height)*180/Math.PI;
@@ -251,8 +242,6 @@ export default function GlobeView({ events, timelineMotion, spinning, command, o
         const resize = new ResizeObserver(refresh); resize.observe(element);
         const down = (event: PointerEvent) => {
           if (event.button !== 0 || drag.current.active) return;
-          timelineMotion.current.velocity=0;
-          camera.current.lng+=timeTravelOffset;timeTravelOffset=0;
           closeBubble();
           flight.current = null;
           drag.current = { active: true, x: event.clientX, y: event.clientY, last: performance.now(), moved: 0, ended: 0, pointer: event.pointerId };
@@ -333,31 +322,21 @@ export default function GlobeView({ events, timelineMotion, spinning, command, o
         function tick(now: number) {
           const dt = Math.min((now-last)/1000, 0.05); last = now;
           const c = camera.current;
-          const travelSpeed=reducedMotion.current || drag.current.active || keyboardReading ? 0 : timelineTravelSpeed(timelineMotion.current,now,c.direction);
-          const regional=!!selectedCode.current;
           if (flight.current && !drag.current.active) {
             const f = flight.current, blend = 1-Math.exp(-dt*4.5);
             const delta = ((f.lng-c.lng+540)%360+360)%360-180;
             c.lng += delta*blend; c.lat += (f.lat-c.lat)*blend;
             if (Math.abs(delta)<0.05 && Math.abs(f.lat-c.lat)<0.05) { c.lng = f.lng; c.lat = f.lat; flight.current = null; }
           } else if (!drag.current.active) {
-            const idle = spin.current && !keyboardReading ? c.direction*1.7 : 0;
-            const target = !regional && travelSpeed ? travelSpeed*Math.min(1,c.altitude/.9) : idle;
-            c.vx = target+(c.vx-target)*Math.exp(-dt*(!regional && Math.abs(travelSpeed)>2 ? 22 : 1.8));
+            const target = spin.current && !keyboardReading ? c.direction*1.7 : 0;
+            c.vx = target+(c.vx-target)*Math.exp(-dt*1.45);
             c.vy *= Math.exp(-dt*3.8);
             c.lng += c.vx*dt; c.lat = Math.max(-78, Math.min(78, c.lat+c.vy*dt));
           }
-          // At a country/province, rock the view by a bounded angle instead of
-          // integrating velocity. It returns to the same place after release.
-          const offsetTarget=regional && !flight.current ? travelSpeed/MAX_TIME_TRAVEL_SPEED*Math.min(2,c.altitude*4) : 0;
-          timeTravelOffset+=(offsetTarget-timeTravelOffset)*(1-Math.exp(-dt*7));
-          if(reducedMotion.current)timeTravelOffset=0;
           c.lng = ((c.lng+180)%360+360)%360-180;
           c.altitude += (c.targetAltitude-c.altitude)*(1-Math.exp(-dt*7));
-          globe.pointOfView({ lat: c.lat, lng: c.lng+timeTravelOffset, altitude: c.altitude }, 0);
-          const warpSpeed=!regional && !reducedMotion.current && timelineMotion.current.velocity ? c.vx : 0;
-          sky.update(now,warpSpeed);
-          element.dataset.timeWarp=String(sky.warping);
+          globe.pointOfView({ lat: c.lat, lng: c.lng, altitude: c.altitude }, 0);
+          sky.update(now);
           element.dataset.meteor = sky.active ? "visible" : "quiet";
           if(now-lastLabelLayout>120){
             layoutBubbles();
@@ -372,12 +351,10 @@ export default function GlobeView({ events, timelineMotion, spinning, command, o
             }
             lastLabelLayout=now;
           }
-          element.dataset.longitude = (c.lng+timeTravelOffset).toFixed(3);
+          element.dataset.longitude = c.lng.toFixed(3);
           element.dataset.latitude = c.lat.toFixed(3);
           element.dataset.altitude = c.altitude.toFixed(3);
           element.dataset.velocity = c.vx.toFixed(3);
-          element.dataset.timeTravel = travelSpeed ? timelineMotion.current.velocity<0 ? "past" : "future" : "idle";
-          element.dataset.travelOffset = timeTravelOffset.toFixed(4);
           frame = requestAnimationFrame(tick);
         }
         frame = requestAnimationFrame(tick);
@@ -386,7 +363,6 @@ export default function GlobeView({ events, timelineMotion, spinning, command, o
         dispose = () => {
           cancelAnimationFrame(frame); resize.disconnect();
           boundaryRequest?.abort();boundaryVersion++;
-          motionPreference.removeEventListener("change",updateMotionPreference);
           sky.dispose();
           canvas.removeEventListener("pointerdown", down); canvas.removeEventListener("pointermove", move);
           canvas.removeEventListener("pointerenter", enter);
@@ -410,7 +386,6 @@ export default function GlobeView({ events, timelineMotion, spinning, command, o
 
   useEffect(() => {
     if (!command) return;
-    timelineMotion.current.velocity=0;
     const c = camera.current;
     if (command.action === "in" || command.action === "out") overview.current.active = false;
     if (command.action === "back") {navigation.current.back();return;}
@@ -426,7 +401,6 @@ export default function GlobeView({ events, timelineMotion, spinning, command, o
       aria-label="交互地球。方向键旋转，加减键缩放，空格暂停或继续自转，Home 返回全球，Enter 选择地区。也可拖动地球、悬停预览、点击国家放大。"
       onKeyDown={event => {
         if (event.target !== event.currentTarget) return;
-        timelineMotion.current.velocity=0;
         const c = camera.current;
         flight.current = null;
         if (event.key === "Home") { event.preventDefault(); callbacks.current.onReset(); return; }
