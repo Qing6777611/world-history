@@ -343,7 +343,7 @@ export default function GlobeView({ events, timelineMotion, spinning, command, o
           } else if (!drag.current.active) {
             const idle = spin.current && !keyboardReading ? c.direction*1.7 : 0;
             const target = !regional && travelSpeed ? travelSpeed*Math.min(1,c.altitude/.9) : idle;
-            c.vx = target+(c.vx-target)*Math.exp(-dt*(!regional && Math.abs(travelSpeed)>2 ? 16 : 1.8));
+            c.vx = target+(c.vx-target)*Math.exp(-dt*(!regional && Math.abs(travelSpeed)>2 ? 22 : 1.8));
             c.vy *= Math.exp(-dt*3.8);
             c.lng += c.vx*dt; c.lat = Math.max(-78, Math.min(78, c.lat+c.vy*dt));
           }
@@ -355,7 +355,9 @@ export default function GlobeView({ events, timelineMotion, spinning, command, o
           c.lng = ((c.lng+180)%360+360)%360-180;
           c.altitude += (c.targetAltitude-c.altitude)*(1-Math.exp(-dt*7));
           globe.pointOfView({ lat: c.lat, lng: c.lng+timeTravelOffset, altitude: c.altitude }, 0);
-          sky.update(now);
+          const warpSpeed=!regional && !reducedMotion.current && timelineMotion.current.velocity ? c.vx : 0;
+          sky.update(now,warpSpeed);
+          element.dataset.timeWarp=String(sky.warping);
           element.dataset.meteor = sky.active ? "visible" : "quiet";
           if(now-lastLabelLayout>120){
             layoutBubbles();

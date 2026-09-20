@@ -93,7 +93,8 @@ button:focus-visible,a:focus-visible,[tabindex]:focus-visible,input:focus-visibl
 
 /* Small speech bubbles live on the globe, never in a separate panel.
    The front title wins; two subdued layers suggest more stories underneath. */
-.globe-bubble-anchor{width:0;height:0;pointer-events:none}
+.globe-bubble-anchor{width:0;height:0;pointer-events:none;transition:opacity .25s ease}
+.globe-canvas[data-time-warp=true] .globe-bubble-anchor{opacity:0;visibility:hidden}
 .globe-bubble-panel{position:absolute;bottom:calc(20px + var(--bubble-lift,0px));left:0;transform:translateX(calc(-50% + var(--bubble-shift,0px)));width:max-content;max-width:216px;pointer-events:auto;cursor:default}
 .globe-bubble-panel:after{content:"";position:absolute;top:100%;left:calc(50% - var(--bubble-shift,0px));width:10px;height:6px;background:#0d171d80;clip-path:polygon(0 0,100% 0,50% 100%);transform:translate(-50%,-1px);pointer-events:none}
 .globe-bubble-deck{position:relative;padding-bottom:calc((var(--bubble-count) - 1)*6px)}

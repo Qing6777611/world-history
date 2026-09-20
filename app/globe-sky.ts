@@ -51,6 +51,71 @@ export function createGlobeSky(THREE: typeof import("three"), scene: Scene, came
   sky.raycast = () => {};
   scene.add(streak);
 
+  // Curved ribbons sit on the same celestial sphere as the stars. They follow
+  // the camera's orbital direction and are occluded by the globe itself.
+  const arcs=180, segments=18;
+  const longitude:number[]=[],latitude:number[]=[],progress:number[]=[],side:number[]=[],brightness:number[]=[];
+  const positions:number[]=[],indices:number[]=[];
+  let seed=217;
+  const random=()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};
+  for(let arc=0;arc<arcs;arc++) {
+    const lng=random()*Math.PI*2,lat=Math.asin(random()*1.94-.97),light=.45+random()*.55;
+    const base=positions.length/3;
+    for(let step=0;step<=segments;step++)for(const edge of [-1,1]) {
+      positions.push(0,0,0);longitude.push(lng);latitude.push(lat);
+      progress.push(step/segments);side.push(edge);brightness.push(light);
+    }
+    for(let step=0;step<segments;step++) {
+      const a=base+step*2;indices.push(a,a+1,a+2,a+2,a+1,a+3);
+    }
+  }
+  const trailGeometry=new THREE.BufferGeometry();
+  trailGeometry.setAttribute("position",new THREE.Float32BufferAttribute(positions,3));
+  for(const [name,values] of Object.entries({aLongitude:longitude,aLatitude:latitude,aProgress:progress,aSide:side,aBrightness:brightness})) {
+    trailGeometry.setAttribute(name,new THREE.Float32BufferAttribute(values,1));
+  }
+  trailGeometry.setIndex(indices);
+  const trailMaterial=new THREE.ShaderMaterial({
+    uniforms:{strength:{value:0},direction:{value:1}},
+    vertexShader:`
+      uniform float strength;
+      uniform float direction;
+      attribute float aLongitude;
+      attribute float aLatitude;
+      attribute float aProgress;
+      attribute float aSide;
+      attribute float aBrightness;
+      varying float vProgress;
+      varying float vSide;
+      varying float vBrightness;
+      void main() {
+        vProgress=aProgress;vSide=aSide;vBrightness=aBrightness;
+        float angle=aLongitude+direction*aProgress*(.04+strength*.72);
+        float latitude=aLatitude+aSide*(.0006+strength*.0015)*(1.0-aProgress*.7);
+        vec3 point=8000.0*vec3(cos(latitude)*sin(angle),sin(latitude),cos(latitude)*cos(angle));
+        gl_Position=projectionMatrix*viewMatrix*vec4(point,1.0);
+      }
+    `,
+    fragmentShader:`
+      uniform float strength;
+      varying float vProgress;
+      varying float vSide;
+      varying float vBrightness;
+      void main() {
+        float core=exp(-vSide*vSide*14.0)+.22*exp(-vSide*vSide*2.5);
+        float tail=pow(1.0-vProgress,1.5);
+        vec3 color=mix(vec3(.54,.75,1.0),vec3(.96,.93,.82),vBrightness);
+        gl_FragColor=vec4(color,core*tail*vBrightness*strength*.85);
+      }
+    `,
+    transparent:true,depthWrite:false,depthTest:true,side:THREE.DoubleSide,
+    blending:THREE.AdditiveBlending,toneMapped:false,
+  });
+  const trails=new THREE.Mesh(trailGeometry,trailMaterial);
+  trails.name="atlas-time-trails";trails.visible=false;trails.frustumCulled=false;
+  trails.raycast=()=>{};scene.add(trails);
+  let warpStrength=0,lastWarpAt=performance.now();
+
   const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
   const start = new THREE.Vector3(), travel = new THREE.Vector3();
   const worldPoint = new THREE.Vector3(), direction = new THREE.Vector3();
@@ -83,12 +148,24 @@ export function createGlobeSky(THREE: typeof import("three"), scene: Scene, came
 
   return {
     get active() { return streak.visible && streakMaterial.uniforms.opacity.value > .35; },
-    update(now: number) {
+    get warping() { return warpStrength>.08; },
+    update(now: number,travelSpeed=0) {
+      const dt=Math.min(.05,Math.max(0,(now-lastWarpAt)/1000));lastWarpAt=now;
+      const target=motion.matches || document.hidden ? 0 : Math.max(0,Math.min(1,(Math.abs(travelSpeed)-35)/500));
+      warpStrength+=(target-warpStrength)*(1-Math.exp(-dt*9));
+      if(motion.matches || document.hidden)warpStrength=0;
+      trailMaterial.uniforms.strength.value=warpStrength;
+      if(Math.abs(travelSpeed)>2)trailMaterial.uniforms.direction.value=Math.sign(travelSpeed);
+      trails.visible=warpStrength>.005;
+      // Let the luminous trails carry the speed without flashing the background.
+      const starBrightness=2.8-warpStrength*1.1;
+      skyMaterial.color.setRGB(starBrightness,starBrightness,starBrightness);
       if (motion.matches || document.hidden) {
         streak.visible = false;
         schedule(now);
         return;
       }
+      if(warpStrength>.08){streak.visible=false;schedule(now);return;}
       if (!streak.visible && now >= nextAt) launch(now);
       if (!streak.visible) return;
       const progress = (now - startedAt) / duration;
@@ -104,9 +181,10 @@ export function createGlobeSky(THREE: typeof import("three"), scene: Scene, came
     },
     dispose() {
       disposed = true;
-      scene.remove(sky, streak);
+      scene.remove(sky, streak, trails);
       sky.geometry.dispose(); skyMaterial.dispose(); texture.dispose();
       streakGeometry.dispose(); streakMaterial.dispose();
+      trailGeometry.dispose();trailMaterial.dispose();
     },
   };
 }
