@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-23T07:56:48.330Z",
+  "events": 19933,
+  "years": 1466,
+  "minYear": -4004,
+  "maxYear": 2026,
+  "days": 366,
+  "withCoordinates": 6915,
+  "withChineseTitle": 19933,
+  "withChineseDescription": 19933,
+  "chineseDescriptionSources": {
+    "manual": 50,
+    "mt": 19883,
+    "untranslated": 0
+  },
+  "withImportance": 0,
+  "yearBytes": 12996878,
+  "dayBytes": 12995778
+}

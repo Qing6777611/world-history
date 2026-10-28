@@ -1,4 +1,4 @@
-import { hasCoordinates, type AtlasEvent } from "./demo-data";
+import { hasCoordinates, type AtlasEvent } from "./atlas-model";
 
 // A small editorial selection for the interaction prototype. Priority is
 // explicit; recency is not used as a substitute for historical importance.

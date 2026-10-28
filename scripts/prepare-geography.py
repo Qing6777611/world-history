@@ -1,8 +1,17 @@
 """Prepare compact, attributed modern geography for the atlas.
 
-Inputs: Natural Earth populated places / admin-1 GeoJSON and DataV China
-province GeoJSON. Original downloads stay outside the checkout.
+Inputs (download separately; they stay outside the checkout):
+
+- Natural Earth admin-1 states/provinces (10m):
+  https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-1-states-provinces/
+- Natural Earth populated places (10m):
+  https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-populated-places/
+- DataV China provinces:
+  https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json
+
+Usage: python3 scripts/prepare-geography.py --admin1 <file> --places <file> --china <file>
 """
+import argparse
 import json
 from pathlib import Path
 
@@ -10,6 +19,12 @@ ROOT = Path(__file__).resolve().parents[1] / 'public' / 'data'
 BOUNDARIES = ROOT / 'boundaries'
 BOUNDARIES.mkdir(exist_ok=True)
 COUNTRY_CODES = {'SAH':'ESH','PSX':'PSE','SDS':'SSD'}
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--admin1', default='/tmp/atlas-admin1.geojson')
+parser.add_argument('--places', default='/tmp/atlas-populated-places.geojson')
+parser.add_argument('--china', default='/tmp/atlas-china-provinces.json')
+inputs = parser.parse_args()
 
 def write(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, separators=(',', ':')))
@@ -44,7 +59,7 @@ def geometry(value, tolerance=.012):
 def collection(features, source, url, label):
     return {'features':features,'source':source,'sourceUrl':url,'label':label}
 
-natural = json.load(open('/tmp/atlas-admin1.geojson'))['features']
+natural = json.load(open(inputs.admin1))['features']
 grouped = {}
 for f in natural:
     p = f['properties']; code = COUNTRY_CODES.get(p['adm0_a3'],p['adm0_a3'])
@@ -55,7 +70,7 @@ for f in natural:
 for code, features in grouped.items():
     write(BOUNDARIES / (code+'.json'), collection(features,'Natural Earth','https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-1-states-provinces/','省／州级行政区'))
 
-provinces = [f for f in json.load(open('/tmp/atlas-china-provinces.json'))['features'] if f['properties']['name']]
+provinces = [f for f in json.load(open(inputs.china))['features'] if f['properties']['name']]
 def china_feature(f):
     p=f['properties']
     return {'type':'Feature','properties':{'id':str(p['adcode']),'name':p['name'],'country':'CHN','level':'1'},'geometry':geometry(f['geometry'])}
@@ -63,10 +78,12 @@ write(BOUNDARIES/'CHN.json',collection([china_feature(f) for f in provinces],'Da
 
 
 cities=[]
-for f in json.load(open('/tmp/atlas-populated-places.geojson'))['features']:
+for f in json.load(open(inputs.places))['features']:
     p=f['properties']; code=COUNTRY_CODES.get(p['ADM0_A3'],p['ADM0_A3']); code='CHN' if code in ['TWN','HKG','MAC'] else code
     lng,lat=f['geometry']['coordinates']
-    cities.append({'id':str(p['NE_ID']),'name':p.get('NAME_ZH') or p['NAME'],'country':code,'lat':round(lat,4),'lng':round(lng,4),'rank':p['SCALERANK'],'capital':bool(p['ADM0CAP'] and not (code=='CHN' and p['ADM0_A3']!='CHN')),'population':p['POP_MAX']})
+    cities.append({'name':p.get('NAME_ZH') or p['NAME'],'country':code,'lat':round(lat,3),'lng':round(lng,3),'rank':p['SCALERANK'],'capital':bool(p['ADM0CAP'] and not (code=='CHN' and p['ADM0_A3']!='CHN')),'population':p['POP_MAX']})
 cities.sort(key=lambda c:(not c['capital'],c['rank'],-c['population']))
-write(ROOT/'cities.json',cities)
+# Compact tuples keep the payload small: [name, country, lat, lng, rank, capital].
+# scripts output order is significant; the client preserves it when picking markers.
+write(ROOT/'cities.json',[[c['name'],c['country'],c['lat'],c['lng'],c['rank'],1 if c['capital'] else 0] for c in cities])
 print('Prepared',len(cities),'cities and',len(grouped)+1,'country boundary files')

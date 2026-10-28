@@ -1,6 +1,11 @@
 import type { CountryFeature, Coordinate } from "./country-geometry";
 
-export type City = { id: string; name: string; country: string; lat: number; lng: number; rank: number; capital: boolean; population: number };
+export type City = { id: string; name: string; country: string; lat: number; lng: number; rank: number; capital: boolean };
+// cities.json ships compact tuples to keep the first-load payload small.
+export type RawCity = [name: string, country: string, lat: number, lng: number, rank: number, capital: 0 | 1];
+export function decodeCities(raw: RawCity[]): City[] {
+  return raw.map(([name, country, lat, lng, rank, capital], index) => ({ id: `${country}-${index}`, name, country, lat, lng, rank, capital: capital === 1 }));
+}
 export type AdminFeature = CountryFeature & { properties: { id: string; name: string; country: string; level: string; english?: string } };
 export type AdminCollection = { features: AdminFeature[]; source: string; sourceUrl: string; label: string };
 export const isAdmin = (f: CountryFeature): f is AdminFeature => !!f.properties.level;

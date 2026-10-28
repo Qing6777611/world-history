@@ -1,0 +1,11 @@
+{
+  "name": "Cliopatria",
+  "url": "https://github.com/Seshat-Global-History-Databank/cliopatria",
+  "version": "v0.2.0",
+  "commit": "ad28a691b7c07c1fca89d0e0636d324667d2a258",
+  "downloadUrl": "https://raw.githubusercontent.com/Seshat-Global-History-Databank/cliopatria/ad28a691b7c07c1fca89d0e0636d324667d2a258/cliopatria.geojson.zip",
+  "sha256": "d01ae3a20d358cc5d54f69d9d725d390767d9c8759ac89ad6f90c58d106f3370",
+  "archiveMember": "cliopatria_polities_only.geojson",
+  "license": { "name": "CC BY 4.0", "url": "https://creativecommons.org/licenses/by/4.0/" },
+  "citation": "Chalstrey, Ed, & Bennett, James (2026). Seshat-Global-History-Databank/cliopatria (v0.2.0). Zenodo. https://doi.org/10.5281/zenodo.20274630"
+}

@@ -1,7 +1,49 @@
-import { yearLabel, type AtlasEvent } from "./demo-data";
+import { hasCoordinates, yearLabel, type AtlasEvent } from "./atlas-model";
+import { countryCode, countryRegion, countryView, type CountryFeature } from "./country-geometry";
 import { notificationCopy, type CountryMessages } from "./notification-events";
 
 export type GlobeBubble = CountryMessages & { name: string; selected?: boolean };
+
+export function eventMatchesCountry(event: AtlasEvent, code: string, historical = false) {
+  return historical ? event.country === code || !!event.polityIds?.includes(code)
+    : (event.country === "TWN" ? "CHN" : event.country) === (code === "TWN" ? "CHN" : code);
+}
+
+/** Overview uses one primary polity per event; a polity close-up also includes
+ * overlapping allegiances. Original event objects survive grouping unchanged. */
+export function historicalEventBubbles(events: AtlasEvent[], features: CountryFeature[], {
+  country = null, selectedId, locale = "zh",
+}: { country?: string | null; selectedId?: string; locale?: "zh" | "en" } = {}): GlobeBubble[] {
+  const byCode = new Map(features.map(feature => [countryCode(feature), feature]));
+  const ordered = [...events].sort((a, b) => Number(b.id === selectedId) - Number(a.id === selectedId));
+  const groups = new Map<string, GlobeBubble>();
+  let fallback: { lat: number; lng: number } | undefined;
+  for (const event of ordered) {
+    if (country && !eventMatchesCountry(event, country, true)) continue;
+    const primary = byCode.has(event.country) ? event.country : event.polityIds?.find(id => byCode.has(id));
+    const code = country || primary || `place:${event.location}`;
+    const feature = byCode.get(code);
+    if (!hasCoordinates(event) && (!country || !feature)) continue;
+    if (!hasCoordinates(event) && !fallback && feature) fallback = countryView(feature, 1, 50);
+    const point = hasCoordinates(event) ? event : fallback!;
+    const key = country ? `${point.lat.toFixed(6)},${point.lng.toFixed(6)}` : code;
+    let group = groups.get(key);
+    if (!group) {
+      if (groups.size >= 6) continue;
+      const center = !country && feature ? countryView(feature, 1, 50) : point;
+      group = {
+        country: code, lat: center.lat, lng: center.lng, events: [], selected: false,
+        name: country && hasCoordinates(event) ? event.location : feature ? countryRegion(feature, locale).name : event.location,
+      };
+      groups.set(key, group);
+    }
+    if (group.events.length < 3) {
+      group.events.push(event);
+      if (event.id === selectedId) group.selected = true;
+    }
+  }
+  return [...groups.values()];
+}
 
 // The renderer owns the anchor's transform. All presentation and folding stay
 // inside it, so the speech bubble follows the country's surface as it rotates.
@@ -10,7 +52,7 @@ export function createGlobeBubble(group:GlobeBubble, callbacks:{
   enter:()=>void;
   expand:(close:()=>void)=>void;
   reading:(active:boolean)=>void;
-}) {
+}, locale: "zh" | "en" = "zh") {
   const anchor=document.createElement("div");
   anchor.className="globe-bubble-anchor";
   anchor.dataset.country=group.country;
@@ -21,7 +63,7 @@ export function createGlobeBubble(group:GlobeBubble, callbacks:{
   const panel=document.createElement("div");
   panel.className="globe-bubble-panel";
   panel.setAttribute("role","group");
-  panel.setAttribute("aria-label",`${group.name}的历史消息`);
+  panel.setAttribute("aria-label", locale === "en" ? `Historical events in ${group.name}` : `${group.name}的历史消息`);
   panel.style.setProperty("--bubble-count",String(group.events.length));
   const deck=document.createElement("div");
   deck.className="globe-bubble-deck";
@@ -34,13 +76,14 @@ export function createGlobeBubble(group:GlobeBubble, callbacks:{
     button.style.setProperty("--bubble-index",String(index));
     const title=notificationCopy(event).title;
     const eventYear=event.historical?.year ?? event.start;
-    button.setAttribute("aria-label",`${group.name}：${title}，${yearLabel(eventYear)}${index===0 && group.events.length>1 ? "，展开消息或查看详情" : "，查看详情"}`);
+    const labelYear = locale === "en" ? `${Math.abs(eventYear)} ${eventYear < 0 ? "BCE" : "CE"}` : yearLabel(eventYear);
+    button.setAttribute("aria-label", locale === "en" ? `${group.name}: ${title}, ${labelYear}, ${index === 0 && group.events.length > 1 ? "expand events or view details" : "view details"}` : `${group.name}：${title}，${labelYear}${index===0 && group.events.length>1 ? "，展开消息或查看详情" : "，查看详情"}`);
     const label=document.createElement("span");
     label.className="globe-bubble-title";
     label.textContent=title;
     const year=document.createElement("span");
     year.className="globe-bubble-year";
-    year.textContent=`${eventYear<0 ? "公元前" : ""}${Math.abs(eventYear)}年`;
+    year.textContent=locale === "en" ? labelYear : `${eventYear<0 ? "公元前" : ""}${Math.abs(eventYear)}年`;
     year.setAttribute("aria-hidden","true");
     button.appendChild(year);button.appendChild(label);
     button.onclick=input=>{

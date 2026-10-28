@@ -48,13 +48,35 @@
   --font-mono:ui-monospace,"SF Mono","Cascadia Code","Source Code Pro",monospace;
 }
 
+/* Tailwind only emits utilities for names it finds in this namespace. Every
+   shadcn token must stay mapped here, or classes such as `border-input` and
+   `text-muted-foreground` silently disappear from the built stylesheet. */
 @theme inline{
   --color-background:var(--background);
   --color-foreground:var(--foreground);
+  --color-card:var(--card);
+  --color-card-foreground:var(--card-foreground);
+  --color-popover:var(--popover);
+  --color-popover-foreground:var(--popover-foreground);
+  --color-primary:var(--primary);
+  --color-primary-foreground:var(--primary-foreground);
+  --color-secondary:var(--secondary);
+  --color-secondary-foreground:var(--secondary-foreground);
+  --color-muted:var(--muted);
+  --color-muted-foreground:var(--muted-foreground);
+  --color-accent:var(--accent);
+  --color-accent-foreground:var(--accent-foreground);
+  --color-destructive:var(--destructive);
+  --color-destructive-foreground:var(--foreground);
+  --color-border:var(--border);
+  --color-input:var(--input);
+  --color-ring:var(--ring);
   --radius-sm:4px;
   --radius-md:8px;
   --radius-lg:12px;
   --radius-xl:16px;
+  --font-sans:var(--font-body);
+  --font-serif:var(--font-display);
 }
 
 /* Base */
@@ -110,6 +132,102 @@ button:disabled{
 .globe-area{
   position:absolute;
   inset:0;
+}
+.atlas-map-note{
+  position:absolute;
+  z-index:8;
+  top:20px;
+  left:24px;
+  max-width:calc(100% - 112px - env(safe-area-inset-right));
+  margin:0;
+  padding:6px 10px;
+  border-radius:6px;
+  background:rgba(5,10,15,.8);
+  color:var(--subtle);
+  font-size:12px;
+  pointer-events:none;
+}
+.historical-map-controls{
+  position:absolute;
+  z-index:16;
+  top:max(20px,env(safe-area-inset-top));
+  left:24px;
+  max-width:min(420px,calc(100% - 112px - env(safe-area-inset-right)));
+}
+.map-mode-row,.map-mode-switch{display:flex;align-items:center;gap:4px}
+.map-mode-switch{
+  padding:3px;
+  background:rgba(15,26,35,.96);
+  border:1px solid var(--border);
+  border-radius:8px;
+}
+.map-mode-switch button,.map-source-button{
+  min-height:44px;
+  min-width:44px;
+  border:0;
+  border-radius:6px;
+  background:transparent;
+  color:var(--subtle);
+}
+.map-mode-switch button{padding:8px 16px;font-size:14px;white-space:nowrap}
+.map-mode-switch button[aria-pressed=true]{background:var(--surface-4);color:var(--gold)}
+.map-mode-switch button:hover,.map-source-button:hover{background:var(--surface-3);color:var(--ink)}
+.map-mode-switch button:active,.map-source-button:active{background:var(--surface-4);transform:translateY(1px)}
+.map-source-button{display:grid;place-items:center;background:rgba(5,10,15,.8);flex-shrink:0}
+.historical-map-status,.historical-region-notice{
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  margin:8px 0 0;
+  padding:4px 8px;
+  background:rgba(5,10,15,.82);
+  border-radius:4px;
+  color:var(--subtle);
+  font-size:12px;
+  line-height:1.6;
+  text-wrap:pretty;
+}
+.historical-map-status svg{margin-top:3px;flex-shrink:0}
+.historical-region-notice{color:var(--gold)}
+.map-data-action{
+  display:block;
+  min-height:44px;
+  margin-top:4px;
+  padding:8px;
+  border:0;
+  border-radius:4px;
+  color:var(--gold);
+  background:var(--surface-1);
+  font-size:13px;
+  text-decoration:underline;
+  text-underline-offset:3px;
+}
+.map-data-action:hover{background:var(--surface-3);color:var(--ink)}
+.map-data-action:active{background:var(--surface-4)}
+.map-source-dialog{max-height:calc(100dvh - 40px);overflow-y:auto}
+.map-source-dialog>p{font-size:14px;line-height:1.8;color:var(--subtle);text-wrap:pretty}
+.atlas-app[data-history-controls] .geography-navigation{top:124px}
+.date-edit-icon{
+  align-self:center;
+  color:var(--subtle);
+  flex-shrink:0;
+}
+.event-original{
+  font-size:14px;
+  color:var(--subtle);
+}
+.event-original summary{
+  cursor:pointer;
+  min-height:44px;
+  padding:10px 0;
+}
+.event-original summary:focus-visible{
+  outline:2px solid var(--gold);
+  outline-offset:3px;
+}
+.event-original p{
+  margin:8px 0 0;
+  line-height:1.7;
 }
 .globe-wrap{
   position:absolute;
@@ -234,7 +352,17 @@ button:disabled{
   height:48px;
   display:flex;
   align-items:center;
+  gap:10px;
 }
+.timeline-track{
+  position:relative;
+  flex:1;
+  min-width:0;
+  height:48px;
+  display:flex;
+  align-items:center;
+}
+
 .time-slider{
   width:100%;
   height:48px!important;
@@ -302,6 +430,7 @@ button:disabled{
 /* Timeline Labels */
 .timeline-ends{
   display:flex;
+  align-items:center;
   justify-content:space-between;
   font-size:12px;
   font-weight:500;
@@ -314,14 +443,30 @@ button:disabled{
 /* Day Context */
 .day-context{
   position:absolute;
-  left:0;
-  right:0;
-  top:-32px;
+  top:-48px;
+  left:50%;
+  transform:translateX(-50%);
+  width:max-content;
+  padding:2px 10px;
+  border-radius:999px;
+  background:rgba(5,10,15,.55);
+  backdrop-filter:blur(8px);
   text-align:center;
   font-size:13px;
   font-weight:500;
   color:var(--subtle);
   pointer-events:none;
+}
+
+
+
+
+
+.scope-note{
+  margin-left:8px;
+  font-size:12px;
+  color:var(--faint);
+  letter-spacing:.2px;
 }
 .day-context button{
   min-height:36px;
@@ -544,10 +689,15 @@ button:disabled{
 /* Status messages */
 .map-history-status{
   position:absolute;
-  bottom:calc(var(--globe-footer) + 32px);
+  /* Anchored to the timeline box so it always clears the date and the toggle. */
+  bottom:calc(100% + 60px);
   left:50%;
   transform:translateX(-50%);
   max-width:480px;
+  padding:6px 16px;
+  border-radius:999px;
+  background:rgba(5,10,15,.62);
+  backdrop-filter:blur(8px);
   text-align:center;
   color:var(--subtle);
   font-size:13px;
@@ -586,7 +736,7 @@ button:disabled{
 }
 .keyboard-region-picker select{
   height:48px;
-  max-width:320px;
+  max-width:min(320px,calc(100vw - 108px - env(safe-area-inset-right)));
   background:rgba(15,26,35,.95);
   border:1px solid var(--border);
   color:var(--ink);
@@ -777,7 +927,7 @@ button:disabled{
   z-index:15;
   top:20px;
   left:20px;
-  max-width:calc(100% - 40px);
+  max-width:calc(100% - 108px - env(safe-area-inset-right));
 }
 .geography-breadcrumbs{
   display:flex;
@@ -859,6 +1009,9 @@ button:disabled{
 
 /* Responsive */
 @media(max-width:768px){
+  .historical-map-controls{left:16px;top:max(16px,env(safe-area-inset-top));max-width:calc(100% - 88px - env(safe-area-inset-right))}
+  .map-mode-switch button{padding:8px 12px}
+  .atlas-app[data-history-controls] .geography-navigation{top:136px;left:16px}
   .atlas-app{
     --globe-footer:128px;
   }
@@ -902,7 +1055,7 @@ button:disabled{
     --globe-footer:108px;
   }
   .day-context{
-    top:-28px;
+    top:-44px;
   }
 }
 
@@ -924,4 +1077,134 @@ button:disabled{
   clip:rect(0,0,0,0);
   white-space:nowrap;
   border-width:0;
+}
+
+/* Day event list: keeps events without coordinates reachable. */
+.event-list-toggle{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  min-height:44px;
+  padding:4px 10px;
+  border:1px solid transparent;
+  background:transparent;
+  color:var(--subtle);
+  border-radius:999px;
+  font-size:12px;
+  font-weight:600;
+  letter-spacing:.4px;
+  pointer-events:auto;
+  transition:color .2s ease,border-color .2s ease,background .2s ease;
+}
+/* Keep the event entry discoverable without requiring hover, including touch. */
+.event-list-toggle-label{
+  white-space:nowrap;
+  font-size:12px;
+  letter-spacing:.3px;
+}
+.event-list-toggle b{
+  min-width:20px;
+  padding:0 5px;
+  border-radius:999px;
+  background:rgba(95,201,184,.14);
+  color:var(--teal);
+  font-size:11px;
+  font-weight:600;
+  font-variant-numeric:tabular-nums;
+  text-align:center;
+}
+.event-list-toggle:hover,
+.event-list-toggle:focus-visible{
+  color:var(--teal);
+  border-color:rgba(95,201,184,.35);
+  background:rgba(95,201,184,.08);
+}
+.event-list-sheet{
+  width:min(520px,100vw)!important;
+  max-width:none!important;
+  background:var(--surface-1)!important;
+  border-left:1px solid var(--border)!important;
+  padding:28px 32px 36px;
+  gap:22px;
+  overflow-y:auto;
+}
+.event-list{
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  margin:0;
+  padding:0;
+  list-style:none;
+}
+.event-list button{
+  display:grid;
+  grid-template-columns:56px 1fr;
+  gap:2px 14px;
+  width:100%;
+  padding:12px 10px;
+  border:0;
+  border-radius:8px;
+  background:transparent;
+  text-align:left;
+  align-items:baseline;
+}
+.event-list button:hover,
+.event-list button:focus-visible{
+  background:rgba(95,201,184,.08);
+}
+.event-list-year{
+  color:var(--gold);
+  font-size:13px;
+  font-weight:600;
+  font-variant-numeric:tabular-nums;
+  letter-spacing:.2px;
+}
+.event-list-title{
+  color:var(--foreground);
+  font-size:14px;
+  line-height:1.55;
+}
+.event-list-place{
+  grid-column:2;
+  color:var(--subtle);
+  font-size:12px;
+  letter-spacing:.2px;
+}
+.event-list-place[data-mapped="false"]{
+  color:var(--faint);
+}
+
+/* Language switch and untranslated-original marker. */
+.locale-toggle{
+  position:absolute;
+  z-index:20;
+  top:max(20px,env(safe-area-inset-top));
+  right:max(24px,env(safe-area-inset-right));
+  min-width:44px;
+  min-height:44px;
+  padding:8px 12px;
+  border:1px solid var(--border);
+  border-radius:999px;
+  background:rgba(5,10,15,.8);
+  color:var(--subtle);
+  font-size:12px;
+  font-weight:600;
+  letter-spacing:.4px;
+  pointer-events:auto;
+  transition:color .2s ease,border-color .2s ease;
+}
+.locale-toggle:hover,
+.locale-toggle:focus-visible{
+  color:var(--teal);
+  border-color:rgba(95,201,184,.4);
+}
+.original-tag{
+  margin-left:8px;
+  padding:1px 6px;
+  border:1px solid var(--border);
+  border-radius:4px;
+  color:var(--faint);
+  font-size:11px;
+  letter-spacing:.3px;
+  white-space:nowrap;
 }
